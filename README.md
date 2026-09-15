@@ -35,7 +35,7 @@ Everything is stored in `./data` (a SQLite database plus the uploaded PDFs). Bac
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | For AI sheets | Claude API key from [console.anthropic.com](https://console.anthropic.com/). Without it the app works; the AI buttons are disabled. |
+| `ANTHROPIC_API_KEY` | For AI sheets | Claude API key from the [Claude Console](https://platform.claude.com/) → Settings → API keys (add credits under Billing first). Without it the app works; the AI buttons are disabled. |
 | `APP_PASSWORD` | When hosted | Requires a password to open the app. Always set it if the app is reachable from the internet. |
 | `DATA_DIR` | No | Where the database and PDFs live (default `./data`). |
 
