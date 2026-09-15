@@ -1,26 +1,370 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ───────────── design tokens ───────────── */
+
+:root,
+[data-theme="light"] {
+  --paper: #f6f4ef;
+  --card: #ffffff;
+  --sunken: #efece5;
+  --hover: #ebe7de;
+  --line: #e4dfd4;
+  --line-strong: #d2ccbe;
+  --ink: #1d1b17;
+  --ink-2: #4a463f;
+  --ink-3: #8a847a;
+  --accent: #2f5b4c;
+  --accent-hover: #264b3f;
+  --accent-soft: #e2ece7;
+  --accent-ink: #ffffff;
+  --danger: #b4412f;
+  --danger-soft: #f6e3de;
+  --mark: #fbe897;
+  --shadow-sm: 0 1px 2px rgb(29 27 23 / 0.05);
+  --shadow: 0 1px 2px rgb(29 27 23 / 0.05), 0 10px 30px -14px rgb(29 27 23 / 0.16);
+  --shadow-lg: 0 2px 6px rgb(29 27 23 / 0.06), 0 24px 60px -20px rgb(29 27 23 / 0.28);
+
+  /* highlight + text colors used inside notes; theme-aware so marks stay legible */
+  --hl-yellow: #fbe897;
+  --hl-green: #cdebc5;
+  --hl-blue: #cfe3f7;
+  --hl-pink: #f7d4e2;
+  --hl-orange: #fbd9b6;
+  --hl-purple: #e2d6f5;
+  --tc-red: #c0392b;
+  --tc-orange: #c46a12;
+  --tc-green: #2e7d4f;
+  --tc-blue: #2563b0;
+  --tc-purple: #7b3fb0;
+  --tc-gray: #7a756c;
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --paper: #121211;
+  --card: #1a1a18;
+  --sunken: #161614;
+  --hover: #24231f;
+  --line: #2b2a26;
+  --line-strong: #3b3934;
+  --ink: #edeae3;
+  --ink-2: #bfbab0;
+  --ink-3: #8b867c;
+  --accent: #8fc7b1;
+  --accent-hover: #a8d6c3;
+  --accent-soft: #1e2d27;
+  --accent-ink: #0e1a15;
+  --danger: #e38470;
+  --danger-soft: #3a221d;
+  --mark: #5d4f19;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 10px 30px -14px rgb(0 0 0 / 0.7);
+  --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 60px -20px rgb(0 0 0 / 0.8);
+
+  --hl-yellow: #5d4f19;
+  --hl-green: #264a2c;
+  --hl-blue: #1f3a57;
+  --hl-pink: #53283a;
+  --hl-orange: #5a3616;
+  --hl-purple: #3c2d57;
+  --tc-red: #f08a7a;
+  --tc-orange: #f0a860;
+  --tc-green: #7fd19b;
+  --tc-blue: #83b6f2;
+  --tc-purple: #c39cf0;
+  --tc-gray: #a39e94;
+
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-sunken: var(--sunken);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-fraunces), ui-serif, Georgia, serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --shadow-soft: var(--shadow);
+  --shadow-float: var(--shadow-lg);
+  --animate-fade-in: fade-in 160ms ease-out;
+  --animate-pop: pop 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  --animate-shimmer: shimmer 1.6s linear infinite;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.97) translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+
+/* ───────────── base ───────────── */
+
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* In the base layer so utilities like `focus:outline-none` can override them. */
+@layer base {
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 28%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  dialog::backdrop {
+    background: rgb(20 18 14 / 0.38);
+    backdrop-filter: blur(3px);
+  }
+}
+
+/* Touch screens have no hover, so row action menus stay visible. */
+@media (hover: none) {
+  .row-menu {
+    opacity: 1 !important;
+  }
+}
+
+.shimmer-text {
+  background: linear-gradient(90deg, var(--ink-3) 20%, var(--ink) 50%, var(--ink-3) 80%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: var(--animate-shimmer);
+}
+
+/* ───────────── rich text (notes, sheets, editor) ───────────── */
+
+.rich {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.rich > :first-child { margin-top: 0; }
+.rich > :last-child { margin-bottom: 0; }
+.rich p { margin: 0.5em 0; }
+.rich h1,
+.rich h2,
+.rich h3,
+.rich h4 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--ink);
+}
+.rich h1 { font-size: 1.6em; margin: 1.1em 0 0.4em; }
+.rich h2 { font-size: 1.3em; margin: 1.1em 0 0.35em; }
+.rich h3 { font-size: 1.1em; margin: 0.9em 0 0.3em; }
+.rich h4 { font-size: 1em; margin: 0.8em 0 0.25em; }
+.rich strong { font-weight: 650; }
+.rich a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.rich ul,
+.rich ol { padding-left: 1.35em; margin: 0.45em 0; }
+.rich ul { list-style: disc; }
+.rich ol { list-style: decimal; }
+.rich ul ul { list-style: circle; }
+.rich li { margin: 0.18em 0; }
+.rich li > p { margin: 0; }
+.rich li::marker { color: var(--ink-3); }
+.rich blockquote {
+  border-left: 3px solid var(--line-strong);
+  padding: 0.1em 0 0.1em 0.9em;
+  margin: 0.7em 0;
+  color: var(--ink-2);
+}
+.rich code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.05em 0.3em;
+}
+.rich pre {
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.8em 1em;
+  overflow-x: auto;
+  margin: 0.7em 0;
+}
+.rich pre code { background: none; border: 0; padding: 0; }
+.rich hr { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
+.rich mark {
+  background: var(--mark);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0.02em 0.14em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.rich table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.7em 0;
+  font-size: 0.94em;
+  table-layout: fixed;
+}
+.rich th,
+.rich td {
+  border: 1px solid var(--line-strong);
+  padding: 0.35em 0.55em;
+  vertical-align: top;
+  text-align: left;
+}
+.rich th { background: var(--sunken); font-weight: 600; }
+.rich th p,
+.rich td p { margin: 0; }
+.rich ul[data-type="taskList"] { list-style: none; padding-left: 0.2em; }
+.rich ul[data-type="taskList"] li { display: flex; gap: 0.55em; align-items: flex-start; }
+.rich ul[data-type="taskList"] li > label { margin-top: 0.22em; user-select: none; }
+.rich ul[data-type="taskList"] li > div { flex: 1; }
+.rich ul[data-type="taskList"] input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 0.95em;
+  height: 0.95em;
+  cursor: pointer;
+}
+.rich ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--ink-3); text-decoration: line-through; }
+
+/* comfortable reading for notes */
+.rich-note { font-size: 15.5px; line-height: 1.7; }
+
+/* denser layout for study sheets on screen */
+.rich-sheet { font-size: 14.5px; line-height: 1.55; }
+.rich-sheet h2 {
+  font-size: 1.2em;
+  margin-top: 1.3em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--line);
+}
+.rich-sheet ul { margin: 0.3em 0; }
+.rich-sheet li { margin: 0.12em 0; }
+
+/* editor chrome */
+.ProseMirror { outline: none; min-height: 100%; }
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--ink-3);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+.ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  pointer-events: none;
+}
+.ProseMirror th,
+.ProseMirror td { position: relative; }
+
+/* ───────────── print ───────────── */
+
+.sheet-print {
+  font-size: 8.6pt;
+  line-height: 1.32;
+  column-gap: 0.22in;
+  column-rule: 0.5pt solid #ddd8cc;
+}
+.sheet-print.cols-2 { column-count: 2; }
+.sheet-print.cols-3 { column-count: 3; font-size: 7.8pt; }
+.sheet-print h1,
+.sheet-print h2,
+.sheet-print h3,
+.sheet-print h4 { break-after: avoid; font-family: var(--font-sans); letter-spacing: 0; }
+.sheet-print h1 { font-size: 1.25em; margin: 0.6em 0 0.2em; }
+.sheet-print h2 {
+  font-size: 1.12em;
+  margin: 0.7em 0 0.2em;
+  padding: 0.1em 0.35em;
+  background: #efece5;
+  border-radius: 3px;
+  border: 0;
+}
+.sheet-print h3 { font-size: 1em; margin: 0.45em 0 0.1em; }
+.sheet-print > :first-child { margin-top: 0; }
+.sheet-print p { margin: 0.2em 0; }
+.sheet-print ul,
+.sheet-print ol { margin: 0.12em 0; padding-left: 1.05em; }
+.sheet-print li { margin: 0.04em 0; }
+.sheet-print table { break-inside: avoid; margin: 0.3em 0; font-size: 0.94em; }
+.sheet-print th,
+.sheet-print td { padding: 0.12em 0.3em; }
+.sheet-print blockquote { margin: 0.3em 0; }
+
+@media print {
+  :root,
+  [data-theme="dark"] {
+    --paper: #fff;
+    --card: #fff;
+    --sunken: #f1eee8;
+    --line: #ddd8cc;
+    --line-strong: #cfc9bb;
+    --ink: #111;
+    --ink-2: #333;
+    --ink-3: #666;
+    --mark: #fbe897;
+    --hl-yellow: #fbe897;
+    --hl-green: #cdebc5;
+    --hl-blue: #cfe3f7;
+    --hl-pink: #f7d4e2;
+    --hl-orange: #fbd9b6;
+    --hl-purple: #e2d6f5;
+    --tc-red: #c0392b;
+    --tc-orange: #c46a12;
+    --tc-green: #2e7d4f;
+    --tc-blue: #2563b0;
+    --tc-purple: #7b3fb0;
+    --tc-gray: #7a756c;
+    color-scheme: light;
+  }
+  body { background: #fff; }
+  .no-print { display: none !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+@page {
+  size: letter;
+  margin: 0.45in;
 }
