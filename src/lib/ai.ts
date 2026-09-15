@@ -1,6 +1,8 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
+import { aiConfigured } from "./ai-config";
 import { htmlForPrompt, markdownToSafeHtml, wordCount } from "./html";
+import { describeAiError, generateJson, streamText, UserFacingError, type LlmPart, type StreamCallbacks } from "./llm";
+import { addAiCards, addQuestions, listCards } from "./practice";
 import {
   getClass,
   getDocument,
@@ -17,21 +19,16 @@ import {
   sourcesSignature,
 } from "./repo";
 import { readFile } from "./storage";
-import type { DocumentRow, JobStatus, SheetScope } from "./types";
+import type { DocumentRow, SheetScope } from "./types";
 
-const MODEL = "claude-opus-5";
+export { aiConfigured } from "./ai-config";
+export { UserFacingError } from "./llm";
+export type GenerationCallbacks = StreamCallbacks;
 
-// Native PDF input lets Claude read tables, diagrams and scanned pages. Past these
-// limits (32 MB request / 600 pages) documents are sent as text instead.
+// Native PDF input lets the model read tables, diagrams and scanned pages. Past these
+// limits documents are sent as text instead.
 const PDF_BYTES_BUDGET = 20 * 1024 * 1024;
 const PDF_PAGES_BUDGET = 500;
-
-export function aiConfigured() {
-  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-}
-
-/** A problem the student can fix; its message is shown in the UI as-is. */
-export class UserFacingError extends Error {}
 
 const SHEET_SYSTEM = `You turn course material into study sheets for a master's student. Sheets are printed in a dense two-column layout and used to review for exams, so a sheet is only as good as the examinable knowledge it carries per line.
 
@@ -63,17 +60,18 @@ function escapeAttr(s: string) {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
-type Block = Anthropic.Beta.BetaContentBlockParam;
-
 interface CurriculumSource {
   title: string;
   pages: number;
-  load: () => Promise<Block>;
+  load: () => Promise<LlmPart>;
 }
+
+/** Notes converted by an AI (current "ai", or "claude" from earlier versions) are trusted as faithful text. */
+const aiConverted = (doc: DocumentRow) => doc.import_method === "ai" || doc.import_method === "claude";
 
 /**
  * Picks the best representation of each PDF. Once the student edits the note made from a
- * PDF (or Claude transcribed it), that note is the source of truth; otherwise Claude reads
+ * PDF (or an AI transcribed it), that note is the source of truth; otherwise the model reads
  * the original PDF, which preserves tables and diagrams.
  */
 function curriculumSources(docs: DocumentRow[]): { sources: CurriculumSource[]; skipped: string[] } {
@@ -88,30 +86,27 @@ function curriculumSources(docs: DocumentRow[]): { sources: CurriculumSource[]; 
     const note = getImportNote(doc.id);
     const noteWords = note ? wordCount(note.content) : 0;
     const edited = Boolean(note && doc.imported_at && note.updated_at > doc.imported_at);
-    const textBlock = (data: string): CurriculumSource => ({
+    const textSource = (text: string): CurriculumSource => ({
       title: doc.title,
       pages: doc.page_count,
-      load: async () => ({ type: "document", title: doc.title, source: { type: "text", media_type: "text/plain", data } }),
+      load: async () => ({ type: "document_text", title: doc.title, text }),
     });
 
-    if (note && noteWords >= 30 && (edited || doc.import_method === "claude")) {
-      sources.push(textBlock(htmlForPrompt(note.content)));
+    // Any edit makes her version authoritative (unless she emptied it); AI transcriptions are trusted when substantial.
+    if (note && ((edited && noteWords > 0) || (aiConverted(doc) && noteWords >= 30))) {
+      sources.push(textSource(htmlForPrompt(note.content)));
     } else if (bytesUsed + doc.size <= PDF_BYTES_BUDGET && pagesUsed + doc.page_count <= PDF_PAGES_BUDGET) {
       bytesUsed += doc.size;
       pagesUsed += doc.page_count;
       sources.push({
         title: doc.title,
         pages: doc.page_count,
-        load: async () => ({
-          type: "document",
-          title: doc.title,
-          source: { type: "base64", media_type: "application/pdf", data: (await readFile(internals.stored_name)).toString("base64") },
-        }),
+        load: async () => ({ type: "pdf", title: doc.title, base64: (await readFile(internals.stored_name)).toString("base64") }),
       });
     } else if (noteWords > 0) {
-      sources.push(textBlock(htmlForPrompt(note!.content)));
+      sources.push(textSource(htmlForPrompt(note!.content)));
     } else if (internals.text.trim()) {
-      sources.push(textBlock(internals.text));
+      sources.push(textSource(internals.text));
     } else {
       skipped.push(doc.title);
     }
@@ -119,15 +114,36 @@ function curriculumSources(docs: DocumentRow[]): { sources: CurriculumSource[]; 
   return { sources, skipped };
 }
 
-async function loadSources(sources: CurriculumSource[]): Promise<Block[]> {
-  const blocks = await Promise.all(sources.map((s) => s.load()));
-  // Cache the (large, stable) documents so "Regenerate" soon after is cheap.
-  const last = blocks.at(-1);
-  if (last && last.type === "document") last.cache_control = { type: "ephemeral" };
-  return blocks;
+const loadSources = (sources: CurriculumSource[]) => Promise.all(sources.map((s) => s.load()));
+
+const skippedWarning = (skipped: string[]) =>
+  skipped.length ? `Skipped ${skipped.join(", ")} — too large to send and no text to work from.` : undefined;
+
+/** Everything a unit contains, ready to send: its PDFs (or the edited notes made from them) and the student's own notes. */
+function unitMaterial(unitId: number) {
+  const ctx = getUnitContext(unitId);
+  if (!ctx) throw new UserFacingError("That unit no longer exists.");
+  const documents = listDocuments(unitId);
+  const notes = listNotes(unitId).filter((n) => n.kind === "note" && wordCount(n.content) > 0);
+  if (!documents.length && !notes.length) throw new UserFacingError("Add a PDF or write a note in this unit first.");
+
+  const { sources, skipped } = curriculumSources(documents);
+  const docTitles = new Map(documents.map((d) => [d.id, d.title]));
+  const noteWords = notes.reduce((sum, n) => sum + wordCount(n.content), 0);
+  const pages = sources.reduce((sum, s) => sum + s.pages, 0);
+
+  const notesXml = notes.length
+    ? `<student_notes>\n${notes
+        .map((n) => {
+          const on = n.document_id && docTitles.get(n.document_id);
+          return `<note title="${escapeAttr(n.title || "Untitled")}"${on ? ` taken_on="${escapeAttr(on)}"` : ""}>\n${htmlForPrompt(n.content)}\n</note>`;
+        })
+        .join("\n")}\n</student_notes>`
+    : "";
+  return { ctx, sources, skipped, notes, notesXml, pages, noteWords };
 }
 
-async function buildSheetRequest(scope: SheetScope, scopeId: number): Promise<{ content: Block[]; warning?: string }> {
+async function buildSheetRequest(scope: SheetScope, scopeId: number): Promise<{ parts: LlmPart[]; warning?: string }> {
   if (scope === "document") {
     const doc = getDocument(scopeId);
     if (!doc) throw new UserFacingError("That PDF no longer exists.");
@@ -135,7 +151,7 @@ async function buildSheetRequest(scope: SheetScope, scopeId: number): Promise<{ 
     if (!sources.length) throw new UserFacingError("This PDF is too large to send and has no text to work from.");
     const words = clamp(doc.page_count * 60, 250, 900);
     return {
-      content: [
+      parts: [
         ...(await loadSources(sources)),
         { type: "text", text: `Turn the document "${doc.title}" into a study sheet.\n\n${lengthRule(words)}` },
       ],
@@ -143,26 +159,8 @@ async function buildSheetRequest(scope: SheetScope, scopeId: number): Promise<{ 
   }
 
   if (scope === "unit") {
-    const ctx = getUnitContext(scopeId);
-    if (!ctx) throw new UserFacingError("That unit no longer exists.");
-    const documents = listDocuments(scopeId);
-    const notes = listNotes(scopeId).filter((n) => n.kind === "note" && wordCount(n.content) > 0);
-    if (!documents.length && !notes.length) throw new UserFacingError("Add a PDF or write a note in this unit first.");
-
-    const { sources, skipped } = curriculumSources(documents);
-    const docTitles = new Map(documents.map((d) => [d.id, d.title]));
-    const noteWords = notes.reduce((sum, n) => sum + wordCount(n.content), 0);
-    const pages = sources.reduce((sum, s) => sum + s.pages, 0);
+    const { ctx, sources, skipped, notes, notesXml, pages, noteWords } = unitMaterial(scopeId);
     const words = clamp(pages * 35 + noteWords * 0.4, 400, 1600);
-
-    const notesXml = notes.length
-      ? `<student_notes>\n${notes
-          .map((n) => {
-            const on = n.document_id && docTitles.get(n.document_id);
-            return `<note title="${escapeAttr(n.title || "Untitled")}"${on ? ` taken_on="${escapeAttr(on)}"` : ""}>\n${htmlForPrompt(n.content)}\n</note>`;
-          })
-          .join("\n")}\n</student_notes>`
-      : "";
 
     const sourceList = [
       sources.length ? `the ${sources.length} curriculum document${sources.length > 1 ? "s" : ""} above` : "",
@@ -186,12 +184,12 @@ Combining:
 ${lengthRule(words)}`;
 
     return {
-      content: [
+      parts: [
         ...(await loadSources(sources)),
         ...(notesXml ? [{ type: "text" as const, text: notesXml }] : []),
         { type: "text", text: instructions },
       ],
-      warning: skipped.length ? `Skipped ${skipped.join(", ")} — too large to send and no text to work from.` : undefined,
+      warning: skippedWarning(skipped),
     };
   }
 
@@ -205,7 +203,7 @@ ${lengthRule(words)}`;
   if (!unitSheets.length) throw new UserFacingError("Generate at least one unit study sheet in this section first.");
   const words = clamp(unitSheets.length * 350, 600, 1800);
   return {
-    content: [
+    parts: [
       {
         type: "text",
         text: unitSheets
@@ -222,110 +220,158 @@ ${lengthRule(words)}`,
   };
 }
 
-function describeApiError(err: unknown): string {
-  if (err instanceof UserFacingError) return err.message;
-  if (err instanceof Anthropic.AuthenticationError) return "Claude rejected the API key. Check ANTHROPIC_API_KEY in your environment.";
-  if (err instanceof Anthropic.PermissionDeniedError) return "This API key doesn't have access to Claude Opus 5.";
-  if (err instanceof Anthropic.RateLimitError) return "Claude is rate-limiting requests. Try again in a minute.";
-  if (err instanceof Anthropic.BadRequestError) return `Claude couldn't process these files: ${err.message}`;
-  if (err instanceof Anthropic.APIConnectionError) return "Couldn't reach Claude. Check the internet connection.";
-  if (err instanceof Anthropic.APIError) return `Claude API error (${err.status ?? "unknown"}). Try again shortly.`;
-  if (err instanceof Error && /api key|apiKey|authToken/i.test(err.message)) return "Add ANTHROPIC_API_KEY to .env.local to enable AI features.";
-  console.error("[claude]", err);
-  return "Something went wrong while talking to Claude.";
-}
-
-export interface GenerationCallbacks {
-  status: (s: JobStatus) => void;
-  delta: (text: string) => void;
-}
-
-/** Streams one Claude response as Markdown text. */
-async function streamMarkdown(system: string, content: Block[], cb: GenerationCallbacks) {
-  const client = new Anthropic();
-  const stream = client.beta.messages.stream({
-    model: MODEL,
-    max_tokens: 64000,
-    system,
-    messages: [{ role: "user", content }],
-    thinking: { type: "adaptive" },
-    // If a safety classifier declines, Anthropic re-runs the request on its recommended fallback model.
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-  });
-
-  for await (const event of stream) {
-    if (event.type === "content_block_start") {
-      if (event.content_block.type === "thinking") cb.status("thinking");
-      else if (event.content_block.type === "text") cb.status("writing");
-    } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-      cb.delta(event.delta.text);
-    }
-  }
-
-  const message = await stream.finalMessage();
-  if (message.stop_reason === "refusal")
-    throw new UserFacingError("Claude declined to process this material. Try removing unusual content and try again.");
-  const markdown = message.content
-    .flatMap((b) => (b.type === "text" ? [b.text] : []))
-    .join("")
-    .trim();
-  if (!markdown) throw new UserFacingError("Claude returned nothing. Try again.");
-  return { markdown, truncated: message.stop_reason === "max_tokens" };
-}
-
-/** Streams a study sheet from Claude and saves it. */
+/** Streams a study sheet from the configured AI and saves it. */
 export async function generateSheet(scope: SheetScope, scopeId: number, cb: GenerationCallbacks): Promise<{ html: string; warning?: string }> {
   try {
-    if (!aiConfigured()) throw new UserFacingError("Add ANTHROPIC_API_KEY to .env.local to enable study sheets.");
+    if (!aiConfigured()) throw new UserFacingError("Add a free Gemini API key (or a Claude key) in AI settings to build study sheets.");
     cb.status("reading");
     const sig = sourcesSignature(scope, scopeId);
-    const { content, warning } = await buildSheetRequest(scope, scopeId);
-    const { markdown, truncated } = await streamMarkdown(SHEET_SYSTEM, content, cb);
-    const html = markdownToSafeHtml(markdown);
+    const { parts, warning } = await buildSheetRequest(scope, scopeId);
+    const { text, truncated } = await streamText(SHEET_SYSTEM, parts, cb);
+    const html = markdownToSafeHtml(text.trim());
     saveGeneratedSheet(scope, scopeId, html, sig);
     const cut = truncated ? "The sheet hit the length cap and may be cut off." : undefined;
     return { html, warning: [warning, cut].filter(Boolean).join(" ") || undefined };
   } catch (err) {
-    throw new UserFacingError(describeApiError(err));
+    throw new UserFacingError(describeAiError(err));
   }
 }
 
-/** Has Claude transcribe a PDF (including scanned pages) into the editable note that replaces its current text. */
+const PRACTICE_SYSTEM = `You write retrieval-practice material — flashcards and multiple-choice questions — for a master's student, from their course material. The goal is long-term retention of what will be examined.
+
+Flashcards:
+- One fact per card. Front: a term, concept or pointed question (≤ 15 words). Back: the answer in ≤ 30 words; compressed fragments are fine.
+- For a definition, put the term on the front and its meaning on the back.
+- Cover the most examinable material across all sources: definitions, mechanisms, frameworks and their components, distinctions between easily confused ideas, cause → effect, key numbers.
+- Skip trivia: course logistics, instructor names, slide numbers, learning objectives.
+
+Questions:
+- Test understanding or application where the material allows (e.g. "Which mechanism explains…", a short scenario), not only recall.
+- Exactly one correct answer and three plausible distractors from the same topic, of similar length and grammar. No "all/none of the above", no joke options.
+- "answer" is the 0-based index of the correct choice. "explanation" is one sentence (≤ 25 words) on why it's right.
+
+Stay faithful to the sources and keep the course's terminology. Plain text only — no Markdown, no LaTeX (use Unicode for formulas).`;
+
+const PRACTICE_SCHEMA = {
+  type: "object",
+  properties: {
+    cards: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { front: { type: "string" }, back: { type: "string" } },
+        required: ["front", "back"],
+        additionalProperties: false,
+      },
+    },
+    questions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+          choices: { type: "array", items: { type: "string" } },
+          answer: { type: "integer" },
+          explanation: { type: "string" },
+        },
+        required: ["prompt", "choices", "answer", "explanation"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["cards", "questions"],
+  additionalProperties: false,
+};
+
+interface PracticeOutput {
+  cards: { front: string; back: string }[];
+  questions: { prompt: string; choices: string[]; answer: number; explanation: string }[];
+}
+
+/** Has the AI write flashcards and quiz questions for a unit, skipping cards the unit already has. */
+export async function generatePractice(unitId: number, cb: GenerationCallbacks): Promise<{ html: string; warning?: string; message: string }> {
+  try {
+    if (!aiConfigured()) throw new UserFacingError("Add a free Gemini API key (or a Claude key) in AI settings to generate practice.");
+    cb.status("reading");
+    const { ctx, sources, skipped, notesXml, pages, noteWords } = unitMaterial(unitId);
+    const cardTarget = clamp(pages * 1.5 + noteWords / 120, 12, 40);
+    const questionTarget = clamp(cardTarget / 2, 6, 15);
+    const existing = listCards(unitId)
+      .slice(0, 250)
+      .map((c) => `- ${c.front}`)
+      .join("\n");
+
+    const parts: LlmPart[] = [
+      ...(await loadSources(sources)),
+      ...(notesXml ? [{ type: "text" as const, text: notesXml }] : []),
+      {
+        type: "text",
+        text: `Write about ${cardTarget} flashcards and ${questionTarget} multiple-choice questions (4 choices each) for the unit "${ctx.unit.name}" (${ctx.klass.name} › ${ctx.section.name}).${
+          notesXml ? " Treat the student's own notes as high priority." : ""
+        }${existing ? `\n\nThe student already has these cards — don't repeat them:\n${existing}` : ""}`,
+      },
+    ];
+
+    // Streamed JSON isn't readable mid-way, so only show progress.
+    const output = await generateJson<PracticeOutput>(PRACTICE_SYSTEM, parts, PRACTICE_SCHEMA, { status: cb.status, delta: () => cb.status("writing") });
+    const cards = Array.isArray(output.cards) ? output.cards.filter((c) => typeof c?.front === "string" && typeof c?.back === "string") : [];
+    const questions = Array.isArray(output.questions)
+      ? output.questions.filter(
+          (q) => typeof q?.prompt === "string" && Array.isArray(q.choices) && q.choices.every((c) => typeof c === "string") && typeof q.answer === "number",
+        )
+      : [];
+    const addedCards = addAiCards(unitId, cards, "AI practice set");
+    const addedQuestions = addQuestions(unitId, questions.map((q) => ({ ...q, explanation: typeof q.explanation === "string" ? q.explanation : "" })));
+    if (!addedCards && !addedQuestions) throw new UserFacingError("The AI didn't come up with anything new for this unit. Add more notes and try again.");
+
+    const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+    return {
+      html: "",
+      message: `Added ${plural(addedCards, "flashcard")} and ${plural(addedQuestions, "quiz question")}.`,
+      warning: skippedWarning(skipped),
+    };
+  } catch (err) {
+    throw new UserFacingError(describeAiError(err));
+  }
+}
+
+/** Has the AI transcribe a PDF (including scanned pages) into the editable note that replaces its current text. */
 export async function transcribeDocument(documentId: number, cb: GenerationCallbacks): Promise<{ html: string; warning?: string }> {
   try {
-    if (!aiConfigured()) throw new UserFacingError("Add ANTHROPIC_API_KEY to .env.local to convert PDFs with Claude.");
+    if (!aiConfigured()) throw new UserFacingError("Add a free Gemini API key (or a Claude key) in AI settings to convert PDFs.");
     const doc = getDocument(documentId);
     const internals = getDocumentInternals(documentId);
     if (!doc || !internals) throw new UserFacingError("That PDF no longer exists.");
     if (doc.size > PDF_BYTES_BUDGET || doc.page_count > PDF_PAGES_BUDGET)
-      throw new UserFacingError("This PDF is too large for Claude to convert in one go (over 500 pages or 20 MB).");
+      throw new UserFacingError("This PDF is too large to convert in one go (over 500 pages or 20 MB).");
     cb.status("reading");
 
-    const content: Block[] = [
-      {
-        type: "document",
-        title: doc.title,
-        source: { type: "base64", media_type: "application/pdf", data: (await readFile(internals.stored_name)).toString("base64") },
-      },
+    const parts: LlmPart[] = [
+      { type: "pdf", title: doc.title, base64: (await readFile(internals.stored_name)).toString("base64") },
       {
         type: "text",
         text: `Transcribe "${doc.title}" into Markdown notes.
 
 - Keep all of the content. Do not summarize, shorten, reorder or add anything.
-- Use ## for slide or section titles and ### for subsections; keep the source's bullet and numbered lists.
-- Use Markdown tables for tables and plain Unicode for formulas (no LaTeX).
+- Make it easy to read and study from:
+  - ## for slide or section titles, ### for subsections, #### for minor headings.
+  - Keep bullet and numbered lists, and their nesting — indent sub-points under the point they belong to.
+  - Bold each key term where it's defined or introduced (\`**Term**: meaning\`), and keep the source's own bold and italics.
+  - Put notes, warnings, key points, tips and clinical pearls in a blockquote that starts with a bold label (\`> **Key point:** …\`).
+  - Use Markdown tables for tabular data, and plain Unicode for formulas with real superscripts and subscripts (x², H₂O, no LaTeX).
+  - For slide decks, separate slides with a horizontal rule (---).
+  - Join lines the PDF broke mid-sentence into normal paragraphs.
 - For each figure, chart or diagram, add one italic line describing what it shows.
 - Drop page numbers, repeated headers and footers, and slide-template boilerplate.
 - Start directly with the content.`,
       },
     ];
 
-    const { markdown, truncated } = await streamMarkdown(TRANSCRIBE_SYSTEM, content, cb);
-    const html = markdownToSafeHtml(markdown);
-    setImportContent(documentId, html, "claude");
+    const { text, truncated } = await streamText(TRANSCRIBE_SYSTEM, parts, cb);
+    const html = markdownToSafeHtml(text.trim());
+    setImportContent(documentId, html, "ai");
     return { html, warning: truncated ? "This PDF is very long; the end may be missing. The original PDF is still attached." : undefined };
   } catch (err) {
-    throw new UserFacingError(describeApiError(err));
+    throw new UserFacingError(describeAiError(err));
   }
 }

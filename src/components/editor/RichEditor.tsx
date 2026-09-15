@@ -15,6 +15,7 @@ import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/r
 import StarterKit from "@tiptap/starter-kit";
 import clsx from "clsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Drawing } from "./drawing/DrawingExtension";
 import { EditorBubbleMenu } from "./EditorBubbleMenu";
 import { EditorToolbar } from "./EditorToolbar";
 import { SelectionSync } from "./selection-sync";
@@ -28,8 +29,11 @@ const ExitTop = Extension.create({
     return {
       ArrowUp: ({ editor }) => {
         const handler = exitTopHandlers.get(editor as Editor);
+        if (!handler) return false;
+        // Read the caret the browser really has (see SelectionSync) before deciding.
+        (editor.view as unknown as { domObserver?: { flush?: () => void } }).domObserver?.flush?.();
         const { selection, doc } = editor.state;
-        if (!handler || !selection.empty || selection.from !== Selection.atStart(doc).from) return false;
+        if (!selection.empty || selection.from !== Selection.atStart(doc).from) return false;
         handler();
         return true;
       },
@@ -41,7 +45,7 @@ export function createExtensions(placeholder: string) {
   return [
     ExitTop,
     StarterKit.configure({
-      heading: { levels: [1, 2, 3] },
+      heading: { levels: [1, 2, 3, 4] },
       link: { openOnClick: false, autolink: true, defaultProtocol: "https" },
     }),
     Highlight.configure({ multicolor: true }),
@@ -57,6 +61,7 @@ export function createExtensions(placeholder: string) {
     Placeholder.configure({ placeholder }),
     CharacterCount,
     SelectionSync,
+    Drawing,
   ];
 }
 

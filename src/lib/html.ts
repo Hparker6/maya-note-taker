@@ -11,8 +11,13 @@ const RICH: sanitizeHtml.IOptions = {
     "strong", "b", "em", "i", "u", "s", "del", "mark", "span", "sub", "sup", "a",
     "ul", "ol", "li", "label", "input", "div",
     "table", "colgroup", "col", "thead", "tbody", "tr", "th", "td",
+    // pen sketches (vector strokes + their SVG rendering)
+    "svg", "path",
   ],
   allowedAttributes: {
+    div: ["data-type", "data-id", "data-strokes", "data-height", "data-paper", "class"],
+    svg: ["viewbox", "viewBox", "xmlns", "preserveaspectratio", "preserveAspectRatio"],
+    path: ["d", "style"],
     a: ["href", "target", "rel"],
     mark: ["data-color", "style"],
     span: ["style"],
@@ -33,9 +38,11 @@ const RICH: sanitizeHtml.IOptions = {
       "background-color": COLOR,
       "text-align": [/^(left|right|center|justify)$/],
     },
+    path: { fill: COLOR, "fill-opacity": [/^(0(\.\d+)?|1)$/] },
     col: { width: [/^\d+px$/], "min-width": [/^\d+px$/] },
     table: { "min-width": [/^\d+px$/], width: [/^\d+px$/] },
   },
+  allowedClasses: { div: ["drawing-block"] },
   allowedSchemes: ["http", "https", "mailto"],
   transformTags: {
     a: sanitizeHtml.simpleTransform("a", { target: "_blank", rel: "noopener noreferrer nofollow" }),

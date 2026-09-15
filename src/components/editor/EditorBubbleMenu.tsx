@@ -1,5 +1,6 @@
 "use client";
 
+import { TextSelection } from "@tiptap/pm/state";
 import { useEditorState, type Editor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import clsx from "clsx";
@@ -29,7 +30,10 @@ export function EditorBubbleMenu({ editor, hidden = false }: { editor: Editor; h
   return (
     <BubbleMenu
       editor={editor}
-      shouldShow={({ editor: e, state }) => !state.selection.empty && e.isEditable && !e.isActive("codeBlock")}
+      // Only for selected text — never for a selected block like a sketch, whose own toolbar sits there.
+      shouldShow={({ editor: e, state }) =>
+        state.selection instanceof TextSelection && !state.selection.empty && e.isEditable && !e.isActive("codeBlock")
+      }
       options={{ placement: "top", offset: 8, onHide: () => setLinking(false) }}
       className={clsx("z-40", hidden && "pointer-events-none invisible")}
     >

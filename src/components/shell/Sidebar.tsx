@@ -5,6 +5,8 @@ import {
   ArrowDown,
   ArrowUp,
   BookMarked,
+  Brain,
+  CalendarDays,
   ChevronRight,
   FolderPlus,
   GraduationCap,
@@ -44,7 +46,7 @@ export function Sidebar({
   passwordEnabled: boolean;
   onNavigate?: () => void;
 }) {
-  const { tree, aiReady, openUpload, openSearch, openClassDialog } = useShell();
+  const { tree, aiReady, aiProvider, openAiSettings, practiceDue, openUpload, openSearch, openClassDialog } = useShell();
   const actions = useTreeActions();
   const pathname = usePathname();
   const router = useRouter();
@@ -153,6 +155,25 @@ export function Sidebar({
         >
           <Home className="size-4 text-ink-3" /> Home
         </Link>
+        <Link
+          href="/calendar"
+          onClick={onNavigate}
+          className={clsx(rowBase, "px-2", pathname === "/calendar" ? "bg-hover font-medium text-ink" : "text-ink-2")}
+        >
+          <CalendarDays className="size-4 text-ink-3" /> Calendar
+        </Link>
+        <Link
+          href="/practice"
+          onClick={onNavigate}
+          className={clsx(rowBase, "px-2", pathname === "/practice" ? "bg-hover font-medium text-ink" : "text-ink-2")}
+        >
+          <Brain className="size-4 text-ink-3" /> <span className="flex-1">Practice</span>
+          {practiceDue > 0 && (
+            <span className="rounded-full bg-[var(--tc-orange)] px-1.5 py-px text-[10.5px] font-bold text-white tabular-nums dark:text-[#1a1208]" title={`${practiceDue} cards to review`}>
+              {practiceDue > 99 ? "99+" : practiceDue}
+            </span>
+          )}
+        </Link>
 
         <div className="mt-5 mb-1 flex items-center justify-between px-2">
           <span className="text-[11px] font-semibold tracking-wider text-ink-3 uppercase">Classes</span>
@@ -198,16 +219,17 @@ export function Sidebar({
       </nav>
 
       <div className="flex items-center gap-1 border-t border-line px-3 py-2.5">
-        <span
+        <button
+          onClick={openAiSettings}
           className={clsx(
-            "flex min-w-0 flex-1 items-center gap-1.5 truncate text-xs",
-            aiReady ? "text-ink-3" : "text-[var(--tc-orange)]",
+            "-ml-1.5 flex h-8 min-w-0 flex-1 items-center gap-1.5 truncate rounded-lg px-1.5 text-left text-xs transition-colors hover:bg-hover",
+            aiReady ? "text-ink-3 hover:text-ink" : "text-[var(--tc-orange)]",
           )}
-          title={aiReady ? "Study sheets are generated with Claude Opus 5" : "Set ANTHROPIC_API_KEY to enable study sheets"}
+          title="AI settings"
         >
           <Sparkles className="size-3.5 shrink-0" />
-          {aiReady ? "Claude connected" : "AI not configured"}
-        </span>
+          <span className="truncate">{aiReady ? `AI: ${aiProvider === "gemini" ? "Gemini (free)" : "Claude"}` : "Set up free AI"}</span>
+        </button>
         <button
           onClick={toggleTheme}
           className="grid size-8 place-items-center rounded-lg text-ink-3 hover:bg-hover hover:text-ink"

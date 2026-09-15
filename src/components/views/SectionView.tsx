@@ -77,7 +77,7 @@ export function SectionView({
           aiReady={aiReady}
           blockedReason={ready ? undefined : "Generate at least one unit study sheet in this section first."}
           emptyTitle="Build an exam review"
-          emptyBody="Claude combines every unit's study sheet into one higher-level review — the most testable ideas, connections across units, nothing wasted."
+          emptyBody="AI combines every unit's study sheet into one higher-level review — the most testable ideas, connections across units, nothing wasted."
           sourceSummary={ready ? `${ready} unit sheet${ready === 1 ? "" : "s"}` : undefined}
         />
       </div>

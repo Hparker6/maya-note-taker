@@ -1,11 +1,18 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { ClassNode, ClassRow } from "@/lib/types";
+import type { AiProvider, ClassNode, ClassRow, StudyMode } from "@/lib/types";
 
 export interface ShellApi {
   tree: ClassNode[];
   aiReady: boolean;
+  aiProvider: AiProvider | null;
+  openAiSettings: () => void;
+  /** Cards due (or new) across all classes. */
+  practiceDue: number;
+  startStudy: (request: { mode: StudyMode; unitId?: number; classId?: number }) => void;
+  /** Bumps whenever a study session closes, so practice views can refetch. */
+  studyVersion: number;
   openUpload: (opts?: { unitId?: number; files?: File[] }) => void;
   openSearch: () => void;
   openClassDialog: (klass?: ClassRow) => void;

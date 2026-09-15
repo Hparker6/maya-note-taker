@@ -2,12 +2,14 @@
 
 import clsx from "clsx";
 import { BookMarked, Menu as MenuIcon, UploadCloud } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { APP_NAME } from "@/lib/brand";
-import type { ClassNode, ClassRow } from "@/lib/types";
+import type { AiProvider, ClassNode, ClassRow } from "@/lib/types";
 import { useMediaQuery } from "@/lib/useMediaQuery";
+import { StudySession, type StudyRequest } from "../practice/StudySession";
 import { FeedbackProvider } from "../ui/feedback";
+import { AiSettingsDialog } from "./AiSettingsDialog";
 import { ClassDialog } from "./ClassDialog";
 import { SearchPalette } from "./SearchPalette";
 import { ShellContext, type ShellApi } from "./ShellContext";
@@ -16,18 +18,25 @@ import { UploadDialog } from "./UploadDialog";
 
 export function AppShell({
   tree,
-  aiReady,
+  aiProvider,
+  practiceDue,
   passwordEnabled,
   children,
 }: {
   tree: ClassNode[];
-  aiReady: boolean;
+  aiProvider: AiProvider | null;
+  practiceDue: number;
   passwordEnabled: boolean;
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const aiReady = aiProvider !== null;
   const [upload, setUpload] = useState<{ unitId?: number; files?: File[] } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [study, setStudy] = useState<{ request: StudyRequest; nonce: number } | null>(null);
+  const [studyVersion, setStudyVersion] = useState(0);
   const [classDialog, setClassDialog] = useState<{ klass?: ClassRow } | null>(null);
   const [activeUnit, setActiveUnit] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -50,11 +59,29 @@ export function AppShell({
   const openUpload = useCallback((opts?: { unitId?: number; files?: File[] }) => setUpload(opts ?? {}), []);
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openClassDialog = useCallback((klass?: ClassRow) => setClassDialog({ klass }), []);
+  const openAiSettings = useCallback(() => setAiSettingsOpen(true), []);
+  const startStudy = useCallback((request: StudyRequest) => setStudy({ request, nonce: Date.now() }), []);
+  const endStudy = useCallback(() => {
+    setStudy(null);
+    setStudyVersion((v) => v + 1);
+    router.refresh();
+  }, [router]);
 
   const api = useMemo<ShellApi>(
-    () => ({ tree, aiReady, openUpload, openSearch, openClassDialog, setActiveUnit }),
-    [tree, aiReady, openUpload, openSearch, openClassDialog],
+    () => ({ tree, aiReady, aiProvider, openAiSettings, practiceDue, startStudy, studyVersion, openUpload, openSearch, openClassDialog, setActiveUnit }),
+    [tree, aiReady, aiProvider, openAiSettings, practiceDue, startStudy, studyVersion, openUpload, openSearch, openClassDialog],
   );
+
+  // Tell the server the browser's time zone so "due today" and streaks follow the student's day.
+  useEffect(() => {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz && !document.cookie.split("; ").includes(`tz=${encodeURIComponent(tz)}`)) {
+        document.cookie = `tz=${encodeURIComponent(tz)}; path=/; max-age=31536000; samesite=lax`;
+        router.refresh();
+      }
+    } catch {}
+  }, [router]);
 
   // Ctrl/⌘+K search
   useEffect(() => {
@@ -176,6 +203,18 @@ export function AppShell({
         />
         <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} tree={tree} />
         <ClassDialog open={Boolean(classDialog)} klass={classDialog?.klass} onClose={() => setClassDialog(null)} />
+        <AiSettingsDialog open={aiSettingsOpen} onClose={() => setAiSettingsOpen(false)} />
+        {study && (
+          <StudySession
+            key={study.nonce}
+            request={study.request}
+            onClose={endStudy}
+            onRestart={(request) => {
+              setStudyVersion((v) => v + 1);
+              setStudy({ request, nonce: Date.now() });
+            }}
+          />
+        )}
       </ShellContext.Provider>
     </FeedbackProvider>
   );

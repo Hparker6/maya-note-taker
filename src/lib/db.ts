@@ -133,6 +133,55 @@ const MIGRATIONS: string[] = [
     class_id   INTEGER REFERENCES classes(id) ON DELETE SET NULL
   );
   `,
+  // 3: practice (spaced-repetition flashcards, quiz questions, study log); AI is provider-neutral now.
+  `
+  CREATE TABLE IF NOT EXISTS cards (
+    id                INTEGER PRIMARY KEY,
+    unit_id           INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+    kind              TEXT NOT NULL DEFAULT 'basic',
+    front             TEXT NOT NULL,
+    back              TEXT NOT NULL,
+    source            TEXT NOT NULL DEFAULT 'manual',
+    origin            TEXT NOT NULL DEFAULT '',
+    dedupe_key        TEXT NOT NULL DEFAULT '',
+    ease              REAL NOT NULL DEFAULT 2.5,
+    interval_days     INTEGER NOT NULL DEFAULT 0,
+    reps              INTEGER NOT NULL DEFAULT 0,
+    lapses            INTEGER NOT NULL DEFAULT 0,
+    due_day           TEXT NOT NULL DEFAULT '',
+    last_reviewed_at  TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_cards_unit ON cards(unit_id);
+  CREATE TABLE IF NOT EXISTS quiz_questions (
+    id             INTEGER PRIMARY KEY,
+    unit_id        INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+    prompt         TEXT NOT NULL,
+    choices        TEXT NOT NULL,
+    answer         INTEGER NOT NULL,
+    explanation    TEXT NOT NULL DEFAULT '',
+    source         TEXT NOT NULL DEFAULT 'ai',
+    dedupe_key     TEXT NOT NULL DEFAULT '',
+    times_seen     INTEGER NOT NULL DEFAULT 0,
+    times_correct  INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_questions_unit ON quiz_questions(unit_id);
+  CREATE TABLE IF NOT EXISTS study_log (
+    id          INTEGER PRIMARY KEY,
+    day         TEXT NOT NULL,
+    unit_id     INTEGER REFERENCES units(id) ON DELETE SET NULL,
+    mode        TEXT NOT NULL,
+    items       INTEGER NOT NULL DEFAULT 0,
+    correct     INTEGER NOT NULL DEFAULT 0,
+    xp          INTEGER NOT NULL DEFAULT 0,
+    seconds     INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_study_log_day ON study_log(day);
+  UPDATE documents SET import_method = 'ai' WHERE import_method = 'claude';
+  `,
 ];
 
 declare global {

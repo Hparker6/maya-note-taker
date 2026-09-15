@@ -2,7 +2,7 @@ import { sanitizeRichHtml } from "@/lib/html";
 import { badRequest, handler, notFound, optionalInt, readJson, text } from "@/lib/http";
 import { createNote, getDocument, getUnitContext } from "@/lib/repo";
 
-const MAX_NOTE_CHARS = 2_000_000;
+const MAX_NOTE_CHARS = 8_000_000;
 
 export const POST = handler(async (request: Request) => {
   const body = await readJson(request);

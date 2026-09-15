@@ -3,17 +3,25 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Greeting, NewClassCard, WelcomeActions } from "@/components/home/HomeClient";
+import { PracticeWidget } from "@/components/home/PracticeWidget";
+import { ThisWeek } from "@/components/home/ThisWeek";
 import { RelativeTime } from "@/components/RelativeTime";
+import { upcomingEvents } from "@/lib/calendar";
+import { canvasConfigured, maybeAutoSync } from "@/lib/canvas";
 import { classColor } from "@/lib/colors";
+import { today } from "@/lib/day";
+import { streakInfo, totalStats } from "@/lib/practice";
 import { getRecent, getStats, getTree } from "@/lib/repo";
 
 export const metadata: Metadata = { title: "Home" };
 
 export default async function HomePage() {
   await connection();
+  maybeAutoSync();
   const tree = getTree();
   const stats = getStats();
   const recent = getRecent(8);
+  const day = await today();
 
   if (!tree.length) {
     return (
@@ -29,7 +37,7 @@ export default async function HomePage() {
           {[
             ["Create a class", "Organize it into sections and units that match your syllabus."],
             ["Upload PDFs", "Drag them in. They're searchable and viewable right away."],
-            ["Study smarter", "Claude condenses everything — with your notes merged in — into printable sheets."],
+            ["Study smarter", "Condense everything into printable sheets, then lock it in with flashcards and quizzes."],
           ].map(([title, body], i) => (
             <li key={title} className="rounded-2xl border border-line bg-card p-5 shadow-[var(--shadow-sm)]">
               <span className="grid size-7 place-items-center rounded-full bg-accent-soft text-[13px] font-semibold text-accent">{i + 1}</span>
@@ -129,6 +137,9 @@ export default async function HomePage() {
           </div>
         </section>
 
+        <div className="space-y-10">
+        <PracticeWidget totals={totalStats(day)} streak={streakInfo(day)} />
+        <ThisWeek events={upcomingEvents(20)} canvasConnected={canvasConfigured()} />
         <section>
           <h2 className="mb-4 font-serif text-xl font-semibold tracking-tight">Recently</h2>
           {recent.length ? (
@@ -162,6 +173,7 @@ export default async function HomePage() {
             </p>
           )}
         </section>
+        </div>
       </div>
     </div>
   );

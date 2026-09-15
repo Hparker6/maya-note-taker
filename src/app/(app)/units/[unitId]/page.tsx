@@ -4,7 +4,9 @@ import { connection } from "next/server";
 import { UnitView, type UnitTab } from "@/components/views/UnitView";
 import { aiConfigured } from "@/lib/ai";
 import { ensureImports } from "@/lib/imports";
-import { isRunning, isTaskRunning, transcriptKey } from "@/lib/jobs";
+import { today } from "@/lib/day";
+import { isRunning, isTaskRunning, practiceKey, transcriptKey } from "@/lib/jobs";
+import { listCards, listQuestions, unitStats } from "@/lib/practice";
 import { getUnitContext, listDocuments, listNotes } from "@/lib/repo";
 import { sheetState } from "@/lib/sheets";
 
@@ -32,7 +34,13 @@ export default async function UnitPage({ params, searchParams }: Props) {
     transcribing: isTaskRunning(transcriptKey(d.id)),
     sheet: sheetState("document", d.id),
   }));
-  const initialTab: UnitTab = tab === "sheet" ? "sheet" : "notes";
+  const initialTab: UnitTab = tab === "sheet" || tab === "practice" ? tab : "notes";
+  const practice = {
+    stats: unitStats(id, await today()),
+    cards: listCards(id),
+    questions: listQuestions(id),
+    generating: isTaskRunning(practiceKey(id)),
+  };
 
   return (
     <UnitView
@@ -41,6 +49,7 @@ export default async function UnitPage({ params, searchParams }: Props) {
       documents={documents}
       notes={listNotes(id)}
       sheet={sheetState("unit", id)}
+      practice={practice}
       aiReady={aiConfigured()}
       initialTab={initialTab}
       initialNoteId={note ? Number(note) : undefined}

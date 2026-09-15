@@ -1,7 +1,22 @@
 import { handler, moveDir, notFound, parseId, readJson, text } from "@/lib/http";
-import { deleteUnit, getUnitContext, moveUnit, renameUnit } from "@/lib/repo";
+import { deleteUnit, getSheet, getUnitContext, listNotes, moveUnit, renameUnit } from "@/lib/repo";
 
 type Ctx = { params: Promise<{ id: string }> };
+
+/** What there is to study in a unit (used by calendar events that cover it). */
+export const GET = handler(async (_request: Request, { params }: Ctx) => {
+  const id = parseId((await params).id);
+  const ctx = getUnitContext(id);
+  if (!ctx) throw notFound("Unit not found.");
+  return Response.json({
+    unit: ctx.unit,
+    section: ctx.section,
+    klass: ctx.klass,
+    notes: listNotes(id).map((n) => ({ id: n.id, title: n.title || "Untitled note", kind: n.kind, updated_at: n.updated_at })),
+    has_sheet: Boolean(getSheet("unit", id)),
+    section_has_sheet: Boolean(getSheet("section", ctx.section.id)),
+  });
+});
 
 export const PATCH = handler(async (request: Request, { params }: Ctx) => {
   const id = parseId((await params).id);

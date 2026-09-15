@@ -1,11 +1,12 @@
 import "server-only";
+import { sanitizeRichHtml } from "./html";
 import { extractPdf } from "./pdf";
 import { listDocumentsWithoutImport, setImportContent } from "./repo";
 import { readFile } from "./storage";
 
 /** Turns a PDF's extracted structure into its editable note. */
 export function importExtracted(documentId: number, extracted: { html: string; scanned: boolean }) {
-  return setImportContent(documentId, extracted.scanned ? "" : extracted.html, extracted.scanned ? "" : "local");
+  return setImportContent(documentId, extracted.scanned ? "" : sanitizeRichHtml(extracted.html), extracted.scanned ? "" : "local");
 }
 
 /** Makes sure every PDF (e.g. ones uploaded before notes and PDFs were unified) has an editable note. */

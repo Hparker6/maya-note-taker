@@ -373,7 +373,7 @@ export function createNote(input: { unitId: number; documentId: number | null; t
  * Creates (or replaces the text of) the editable note for a PDF. `imported_at` matches
  * the note's `updated_at`, so a later `updated_at` means the student has edited it.
  */
-export function setImportContent(documentId: number, html: string, method: "local" | "claude" | "") {
+export function setImportContent(documentId: number, html: string, method: "local" | "ai" | "") {
   const doc = getDocument(documentId);
   if (!doc) return undefined;
   const d = db();

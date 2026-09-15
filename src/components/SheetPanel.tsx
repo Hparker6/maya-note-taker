@@ -25,6 +25,7 @@ import { RichEditor } from "./editor/RichEditor";
 import { RelativeTime } from "./RelativeTime";
 import { SaveIndicator } from "./SaveIndicator";
 import { Button, buttonClass } from "./ui/Button";
+import { useShell } from "./shell/ShellContext";
 import { useFeedback } from "./ui/feedback";
 import { Menu } from "./ui/Menu";
 
@@ -60,6 +61,7 @@ export function SheetPanel({
 }) {
   const router = useRouter();
   const { toast, confirm } = useFeedback();
+  const { openAiSettings } = useShell();
   const [sheet, setSheet] = useState<LocalSheet | null>(initial.sheet);
   const [stale, setStale] = useState(initial.stale);
   const [editing, setEditing] = useState(false);
@@ -226,7 +228,7 @@ export function SheetPanel({
                 <div key={i} className="h-3.5 animate-pulse rounded bg-sunken" style={{ width: `${w}%`, animationDelay: `${i * 90}ms` }} />
               ))}
               <p className="pt-3 text-center text-xs text-ink-3">
-                Claude reads every page before writing — long PDFs can take a minute or two. You can leave this page; it keeps going.
+                AI reads every page before writing — long PDFs can take a minute or two. You can leave this page; it keeps going.
               </p>
             </div>
           )}
@@ -248,7 +250,7 @@ export function SheetPanel({
         {error && <ErrorNote message={error} className="mt-5" />}
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
           <Button variant="primary" size="lg" onClick={generate} disabled={!aiReady || Boolean(blockedReason)}>
-            <Sparkles /> {error ? "Try again" : "Generate with Claude"}
+            <Sparkles /> {error ? "Try again" : "Generate with AI"}
           </Button>
           <Button variant="ghost" size="lg" onClick={startBlank}>
             <PenLine /> Write it myself
@@ -256,8 +258,11 @@ export function SheetPanel({
         </div>
         {!aiReady && (
           <p className="mt-4 max-w-sm text-xs leading-relaxed text-ink-3">
-            AI is off. Add <code className="rounded bg-sunken px-1 py-0.5">ANTHROPIC_API_KEY</code> to{" "}
-            <code className="rounded bg-sunken px-1 py-0.5">.env.local</code> and restart the app.
+            AI is off.{" "}
+            <button onClick={openAiSettings} className="font-medium text-accent hover:underline">
+              Set up free AI
+            </button>{" "}
+            with a Google Gemini key — it takes a minute.
           </p>
         )}
         {aiReady && blockedReason && <p className="mt-4 text-xs text-ink-3">{blockedReason}</p>}

@@ -18,6 +18,7 @@ import {
   ListOrdered,
   Minus,
   MoreHorizontal,
+  PenTool,
   Quote,
   Redo2,
   RemoveFormatting,
@@ -301,7 +302,6 @@ export function EditorToolbar({
   const chain = () => editor.chain().focus();
   const m = mod();
   const block = BLOCKS.find((b) => b.level === s.heading) ?? BLOCKS[0];
-  const AlignIcon = s.align === "center" ? AlignCenter : s.align === "right" ? AlignRight : AlignLeft;
 
   return (
     <MenuToggleContext.Provider value={onMenuToggle}>
@@ -318,6 +318,14 @@ export function EditorToolbar({
         </ToolButton>
         <ToolButton title={`Redo (${m}Shift+Z)`} disabled={!s.canRedo} onClick={() => chain().redo().run()}>
           <Redo2 />
+        </ToolButton>
+        <Divider />
+        <ToolButton
+          title="Draw — add a sketch for Apple Pencil, finger or mouse"
+          onClick={() => chain().insertDrawing().run()}
+          className="px-2.5 font-medium text-accent hover:text-accent"
+        >
+          <PenTool /> <span className="text-[13px]">Draw</span>
         </ToolButton>
         <Divider />
 
@@ -442,33 +450,7 @@ export function EditorToolbar({
           <ListChecks />
         </ToolButton>
 
-        <Popover title="Alignment" width="w-40" button={<AlignIcon />}>
-          {(close) =>
-            (
-              [
-                ["left", "Left", AlignLeft],
-                ["center", "Center", AlignCenter],
-                ["right", "Right", AlignRight],
-              ] as const
-            ).map(([value, label, Icon]) => (
-              <MenuRow
-                key={value}
-                active={s.align === value}
-                onClick={() => {
-                  chain().setTextAlign(value).run();
-                  close();
-                }}
-              >
-                <Icon /> {label}
-              </MenuRow>
-            ))
-          }
-        </Popover>
         <Divider />
-
-        <ToolButton title="Quote" active={s.quote} onClick={() => chain().toggleBlockquote().run()}>
-          <Quote />
-        </ToolButton>
         <Popover title="Link" width="w-72" active={s.link} button={<Link2 />}>
           {(close) => <LinkForm editor={editor} close={close} />}
         </Popover>
@@ -502,7 +484,7 @@ export function EditorToolbar({
           title="More formatting"
           width="w-56"
           align="end"
-          active={s.sub || s.sup || s.codeBlock}
+          active={s.sub || s.sup || s.codeBlock || s.quote || s.align !== "left"}
           button={<MoreHorizontal />}
         >
           {(close) => {
@@ -512,6 +494,22 @@ export function EditorToolbar({
             };
             return (
               <>
+                <div className="flex items-center gap-1 px-1 pb-1">
+                  {(
+                    [
+                      ["left", "Align left", AlignLeft],
+                      ["center", "Center", AlignCenter],
+                      ["right", "Align right", AlignRight],
+                    ] as const
+                  ).map(([value, label, Icon]) => (
+                    <ToolButton key={value} title={label} active={s.align === value} onClick={run(() => chain().setTextAlign(value).run())} className="flex-1">
+                      <Icon />
+                    </ToolButton>
+                  ))}
+                </div>
+                <MenuRow active={s.quote} onClick={run(() => chain().toggleBlockquote().run())}>
+                  <Quote /> Quote
+                </MenuRow>
                 <MenuRow active={s.sub} onClick={run(() => chain().toggleSubscript().run())}>
                   <SubIcon /> Subscript <Kbd>{m},</Kbd>
                 </MenuRow>

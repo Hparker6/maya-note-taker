@@ -1,14 +1,14 @@
 import "server-only";
-import { generateSheet, transcribeDocument, type GenerationCallbacks } from "./ai";
+import { generatePractice, generateSheet, transcribeDocument, type GenerationCallbacks } from "./ai";
 import type { JobEvent, JobStatus, SheetScope } from "./types";
 
-// Claude work runs in the server process, independent of any request, so the student
+// AI work runs in the server process, independent of any request, so the student
 // can upload a stack of PDFs and keep working while they are processed.
 
 const MAX_CONCURRENT = 2;
 const KEEP_FINISHED_MS = 60_000;
 
-type Runner = (cb: GenerationCallbacks) => Promise<{ html: string; warning?: string }>;
+type Runner = (cb: GenerationCallbacks) => Promise<{ html: string; warning?: string; message?: string }>;
 
 export interface Job {
   key: string;
@@ -71,7 +71,7 @@ export function startTask(key: string, run: Runner): Job {
   void (async () => {
     await acquireSlot();
     try {
-      const { html, warning } = await run({
+      const { html, warning, message } = await run({
         status: (s) => {
           if (job.status === s) return;
           job.status = s;
@@ -82,7 +82,7 @@ export function startTask(key: string, run: Runner): Job {
           emit(job, { t: "delta", v });
         },
       });
-      job.result = { t: "done", html, warning };
+      job.result = { t: "done", html, warning, message };
     } catch (err) {
       job.result = { t: "error", message: err instanceof Error ? err.message : String(err) };
     } finally {
@@ -101,6 +101,8 @@ export const startSheetJob = (scope: SheetScope, id: number) => startTask(sheetK
 export const startTranscriptJob = (documentId: number) =>
   startTask(transcriptKey(documentId), (cb) => transcribeDocument(documentId, cb));
 export const isRunning = (scope: SheetScope, id: number) => isTaskRunning(sheetKey(scope, id));
+export const practiceKey = (unitId: number) => `practice:${unitId}`;
+export const startPracticeJob = (unitId: number) => startTask(practiceKey(unitId), (cb) => generatePractice(unitId, cb));
 
 /** Replays the job's progress so far, then forwards live events until it ends. */
 export function subscribe(job: Job, listener: (e: JobEvent) => void): () => void {

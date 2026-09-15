@@ -1,11 +1,12 @@
 "use client";
 
 import clsx from "clsx";
-import { MoreHorizontal, NotebookPen, Pencil, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { Brain, MoreHorizontal, NotebookPen, Pencil, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { useState } from "react";
 import { classColor } from "@/lib/colors";
-import type { NoteRow, SheetState, UnitContext, WorkspaceDocument } from "@/lib/types";
+import type { NoteRow, SheetState, UnitContext, UnitPracticeData, WorkspaceDocument } from "@/lib/types";
 import { NotesWorkspace, type SidePanel } from "../NotesWorkspace";
+import { PracticePanel } from "../practice/PracticePanel";
 import { Breadcrumbs } from "../PageHeader";
 import { SheetPanel } from "../SheetPanel";
 import { useShell } from "../shell/ShellContext";
@@ -13,13 +14,14 @@ import { useTreeActions } from "../shell/useTreeActions";
 import { Button, buttonClass } from "../ui/Button";
 import { Menu } from "../ui/Menu";
 
-export type UnitTab = "notes" | "sheet";
+export type UnitTab = "notes" | "sheet" | "practice";
 
 export function UnitView({
   ctx,
   documents,
   notes,
   sheet,
+  practice,
   aiReady,
   initialTab,
   initialNoteId,
@@ -29,6 +31,7 @@ export function UnitView({
   documents: WorkspaceDocument[];
   notes: NoteRow[];
   sheet: SheetState;
+  practice: UnitPracticeData;
   aiReady: boolean;
   initialTab: UnitTab;
   initialNoteId?: number;
@@ -67,6 +70,7 @@ export function UnitView({
   const tabs = [
     { id: "notes" as const, label: "Notes", icon: NotebookPen, count: notes.length },
     { id: "sheet" as const, label: "Study sheet", icon: Sparkles, count: undefined },
+    { id: "practice" as const, label: "Practice", icon: Brain, count: practice.stats.total || undefined },
   ];
 
   return (
@@ -130,7 +134,14 @@ export function UnitView({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col bg-card">
-        {tab === "sheet" ? (
+        {tab === "practice" ? (
+          <PracticePanel
+            unitId={unit.id}
+            unitName={unit.name}
+            initial={practice}
+            hasMaterial={documents.length > 0 || notes.some((n) => n.content.replace(/<[^>]+>/g, "").trim())}
+          />
+        ) : tab === "sheet" ? (
           <SheetPanel
             scope="unit"
             scopeId={unit.id}
@@ -138,7 +149,7 @@ export function UnitView({
             aiReady={aiReady}
             blockedReason={!documents.length && !ownNotes.length ? "Import a PDF or write a note in this unit first." : undefined}
             emptyTitle="Build this unit's study sheet"
-            emptyBody="Claude reads every lecture here — including your edits and highlights — plus your own notes, then writes one dense, organized sheet sized to print on one or two pages."
+            emptyBody="AI reads every lecture here — including your edits and highlights — plus your own notes, then writes one dense, organized sheet sized to print on one or two pages."
             sourceSummary={sources || undefined}
           />
         ) : (

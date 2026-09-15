@@ -4,7 +4,7 @@ import { deleteNote, getNote, updateNote } from "@/lib/repo";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-const MAX_NOTE_CHARS = 2_000_000;
+const MAX_NOTE_CHARS = 8_000_000;
 
 export const PATCH = handler(async (request: Request, { params }: Ctx) => {
   const id = parseId((await params).id);

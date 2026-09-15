@@ -304,6 +304,35 @@ export function applyCourseLinks() {
   `);
 }
 
+export interface DayNote {
+  id: number;
+  title: string;
+  kind: "note" | "import";
+  unit_id: number;
+  class_id: number;
+  created_at: string;
+}
+
+/** Notes taken and lectures imported in a date range, for showing alongside the week's events. */
+export function listNotesCreated(from: string, to: string): DayNote[] {
+  return db()
+    .prepare(
+      `SELECT n.id, n.title, n.kind, n.unit_id, s.class_id, n.created_at FROM notes n
+       JOIN units u ON u.id = n.unit_id JOIN sections s ON s.id = u.section_id
+       WHERE n.created_at >= ? AND n.created_at < ? ORDER BY n.created_at`,
+    )
+    .all(from, to) as DayNote[];
+}
+
+/** Exams and quizzes in the next few weeks that aren't marked done. */
+export function upcomingTests(days = 21, limit = 6): CalendarEvent[] {
+  const start = new Date(Date.now() - 12 * 3600_000).toISOString();
+  const end = new Date(Date.now() + days * 86400_000).toISOString();
+  return listEvents(start, end)
+    .filter((e) => (e.kind === "exam" || e.kind === "quiz") && !e.done)
+    .slice(0, limit);
+}
+
 export function upcomingEvents(limit = 6): CalendarEvent[] {
   const start = new Date(Date.now() - 12 * 3600_000).toISOString();
   const end = new Date(Date.now() + 8 * 86400_000).toISOString();

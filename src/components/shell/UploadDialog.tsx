@@ -193,7 +193,7 @@ function UploadForm({
         const scanned = result.created.filter((c) => !c.has_text).length;
         toast(
           `Imported ${n} PDF${n > 1 ? "s" : ""} as editable notes${condense ? " — condensing in the background" : ""}` +
-            (scanned ? `. ${scanned} had no selectable text (scanned) — open ${scanned > 1 ? "them" : "it"} to convert with Claude.` : ""),
+            (scanned ? `. ${scanned} had no selectable text (scanned) — open ${scanned > 1 ? "them" : "it"} to convert with AI.` : ""),
         );
       }
       const firstNote = result.created.find((c) => c.note_id)?.note_id;
@@ -317,12 +317,12 @@ function UploadForm({
         />
         <span className="text-sm">
           <span className="flex items-center gap-1.5 font-medium text-ink">
-            <Sparkles className="size-3.5 text-accent" /> Also condense each PDF with Claude
+            <Sparkles className="size-3.5 text-accent" /> Also condense each PDF with AI
           </span>
           <span className="mt-0.5 block text-[13px] text-ink-3">
             {aiReady
               ? "Creates a dense one-page study sheet per PDF in the background. You can edit it afterwards."
-              : "Add ANTHROPIC_API_KEY to enable AI study sheets."}
+              : "Set up free AI from the sidebar to enable study sheets."}
           </span>
         </span>
       </label>

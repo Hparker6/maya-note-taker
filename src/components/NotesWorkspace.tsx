@@ -1,5 +1,6 @@
 "use client";
 
+import { Selection } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
 import clsx from "clsx";
 import DOMPurify from "dompurify";
@@ -10,6 +11,7 @@ import {
   Download,
   FileSearch,
   FileText,
+  RefreshCw,
   FolderInput,
   MoreHorizontal,
   NotebookPen,
@@ -42,9 +44,9 @@ import { Menu } from "./ui/Menu";
 export type SidePanel = "pdf" | "sheet" | null;
 
 const TRANSCRIBE_LABEL: Record<JobStatus, string> = {
-  queued: "Waiting for other Claude work to finish…",
-  reading: "Claude is reading every page…",
-  thinking: "Claude is working out the structure…",
+  queued: "Waiting for other AI work to finish…",
+  reading: "AI is reading every page…",
+  thinking: "AI is working out the structure…",
   writing: "Writing your editable notes…",
 };
 
@@ -79,7 +81,7 @@ export function NotesWorkspace({
   initialPanel?: SidePanel;
 }) {
   const router = useRouter();
-  const { openUpload, tree } = useShell();
+  const { openUpload, openAiSettings, tree } = useShell();
   const { toast, confirm } = useFeedback();
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   const isWide = useMediaQuery("(min-width: 1680px)");
@@ -112,7 +114,7 @@ export function NotesWorkspace({
     setNotes((list) => list.map((n) => (n.id === note.id ? { ...n, updated_at: res.updated_at } : n)));
   });
 
-  // Merge fresh server data (new imports, Claude conversions) without clobbering unsaved typing.
+  // Merge fresh server data (new imports, AI conversions) without clobbering unsaved typing.
   const serverSig = serverNotes.map((n) => `${n.id}@${n.updated_at}`).join(",");
   const [seenSig, setSeenSig] = useState(serverSig);
   if (serverSig !== seenSig) {
@@ -154,7 +156,7 @@ export function NotesWorkspace({
   const panelDoc = panel ? selectedDoc : undefined;
   const showList = !isDesktop || !panelDoc || isWide || listOpen;
 
-  // Keep statuses fresh while Claude works in the background.
+  // Keep statuses fresh while AI works in the background.
   const anyRunning = documents.some((d) => d.condensing || d.transcribing);
   useEffect(() => {
     if (!anyRunning) return;
@@ -228,11 +230,12 @@ export function NotesWorkspace({
       e.preventDefault();
       const first = editor.state.doc.firstChild;
       const firstIsEmptyParagraph = first?.type.name === "paragraph" && first.content.size === 0;
-      if (e.key === "Enter" && !editor.isEmpty && !firstIsEmptyParagraph) {
-        editor.chain().insertContentAt(0, { type: "paragraph" }).focus("start").run();
-      } else {
-        editor.commands.focus("start");
-      }
+      if (e.key === "Enter" && !editor.isEmpty && !firstIsEmptyParagraph) editor.commands.insertContentAt(0, { type: "paragraph" });
+      // Move the caret and focus synchronously (editor.commands.focus waits a frame, and the
+      // next keystroke would still land in the title).
+      const { state, view } = editor;
+      view.dispatch(state.tr.setSelection(Selection.atStart(state.doc)).scrollIntoView());
+      view.focus();
     }
   };
 
@@ -291,12 +294,12 @@ export function NotesWorkspace({
 
   useEffect(() => () => transcribeAbort.current?.abort(), []);
 
-  const convertWithClaude = async (doc: WorkspaceDocument, note: NoteRow) => {
+  const convertWithAi = async (doc: WorkspaceDocument, note: NoteRow) => {
     if (hasText(note.content)) {
       const ok = await confirm({
-        title: "Convert with Claude?",
+        title: "Convert with AI?",
         message:
-          "Claude reads the original PDF — including scanned pages, tables and diagrams — and rewrites these notes from it. Any edits you've made to this lecture's text will be replaced.",
+          "AI reads the original PDF — including scanned pages, tables and diagrams — and rewrites these notes from it. Any edits you've made to this lecture's text will be replaced.",
         confirmLabel: "Convert",
       });
       if (!ok) return;
@@ -304,6 +307,30 @@ export function NotesWorkspace({
     await saver.flush();
     setTranscribing({ docId: doc.id, status: "queued", html: "" });
     void attachTranscription(doc, true);
+  };
+
+  const reimport = async (doc: WorkspaceDocument, note: NoteRow) => {
+    if (hasText(note.content)) {
+      const ok = await confirm({
+        title: "Re-import from the PDF?",
+        message: "The text is rebuilt from the original PDF with fresh formatting (headings, bold terms, indented lists). Any edits or highlights you've made to this lecture's text will be replaced.",
+        confirmLabel: "Re-import",
+      });
+      if (!ok) return;
+    }
+    await saver.flush();
+    try {
+      const result = await api<{ note: NoteRow | null; scanned: boolean }>(`/api/documents/${doc.id}/reimport`, { method: "POST" });
+      if (result.note) {
+        const fresh = result.note;
+        setNotes((list) => list.map((n) => (n.id === fresh.id ? { ...n, content: fresh.content, updated_at: fresh.updated_at } : n)));
+        setEditorVersion((v) => v + 1);
+      }
+      toast(result.scanned ? "No selectable text in this PDF — try Convert with AI" : "Re-imported with fresh formatting", result.scanned ? "info" : "success");
+      router.refresh();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't re-import", "error");
+    }
   };
 
   const togglePanel = (which: Exclude<SidePanel, null>) => setPanel((p) => (p === which ? null : which));
@@ -380,7 +407,7 @@ export function NotesWorkspace({
             <div className="truncate text-[14px] font-medium text-ink">{n.title || "Untitled note"}</div>
             {isImport ? (
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11.5px] text-ink-3">
-                {doc?.page_count ? <span>{doc.page_count} pages</span> : null}
+                {doc?.page_count ? <span>{doc.page_count} page{doc.page_count === 1 ? "" : "s"}</span> : null}
                 {docStatus(doc, n)}
               </div>
             ) : (
@@ -489,9 +516,9 @@ export function NotesWorkspace({
                     <span className="inline-flex items-center gap-1.5 text-xs text-ink-3">
                       <FileText className="size-3.5 text-danger/80" />
                       {isImport ? "Lecture PDF" : `On ${selectedDoc.title}`}
-                      {selectedDoc.page_count ? ` · ${selectedDoc.page_count} pages` : ""}
-                      {isImport && selectedDoc.import_method === "claude" && (
-                        <span className="ml-1 rounded-full bg-accent-soft px-1.5 py-px text-[10.5px] font-medium text-accent">Converted by Claude</span>
+                      {selectedDoc.page_count ? ` · ${selectedDoc.page_count} page${selectedDoc.page_count === 1 ? "" : "s"}` : ""}
+                      {isImport && (selectedDoc.import_method === "ai" || selectedDoc.import_method === "claude") && (
+                        <span className="ml-1 rounded-full bg-accent-soft px-1.5 py-px text-[10.5px] font-medium text-accent">Converted by AI</span>
                       )}
                     </span>
                     <div className="ml-auto flex items-center gap-1">
@@ -506,7 +533,8 @@ export function NotesWorkspace({
                           triggerClassName={buttonClass("ghost", "icon-sm")}
                           trigger={<MoreHorizontal />}
                           items={[
-                            { label: "Convert with Claude", icon: <Wand2 />, disabled: !aiReady, onSelect: () => convertWithClaude(selectedDoc, selected) },
+                            { label: "Convert with AI", icon: <Wand2 />, disabled: !aiReady, onSelect: () => convertWithAi(selectedDoc, selected) },
+                            { label: "Re-import from PDF", icon: <RefreshCw />, onSelect: () => reimport(selectedDoc, selected) },
                             { label: "Download PDF", icon: <Download />, onSelect: () => window.open(`/api/documents/${selectedDoc.id}/file?download=1`, "_blank") },
                             { label: "Move to another unit", icon: <FolderInput />, onSelect: () => setMoving(selectedDoc) },
                             { label: "Delete lecture", icon: <Trash2 />, danger: true, separatorBefore: true, onSelect: () => remove(selected) },
@@ -536,14 +564,18 @@ export function NotesWorkspace({
                   <AlertTriangle className="size-4 shrink-0 text-[var(--tc-orange)]" />
                   <span className="min-w-0 flex-1 text-ink-2">
                     No selectable text was found — this PDF is probably scanned or image-based.
-                    {!aiReady && " Add an API key to let Claude convert it."}
+                    {!aiReady && " Set up free AI to convert it into editable text."}
                   </span>
                   <Button size="sm" variant="secondary" onClick={() => setPanel("pdf")}>
                     <FileSearch /> View original
                   </Button>
-                  {aiReady && (
-                    <Button size="sm" variant="primary" onClick={() => convertWithClaude(selectedDoc, selected)}>
-                      <Wand2 /> Convert with Claude
+                  {aiReady ? (
+                    <Button size="sm" variant="primary" onClick={() => convertWithAi(selectedDoc, selected)}>
+                      <Wand2 /> Convert with AI
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="primary" onClick={openAiSettings}>
+                      <Sparkles /> Set up free AI
                     </Button>
                   )}
                 </div>
@@ -603,7 +635,7 @@ export function NotesWorkspace({
           initial={panelDoc.sheet}
           aiReady={aiReady}
           emptyTitle="Condense this lecture"
-          emptyBody={`Claude turns ${panelDoc.page_count ? `all ${panelDoc.page_count} pages` : "this lecture"} into a dense study sheet that fits on about one printed page. Your highlights in the notes count as important.`}
+          emptyBody={`AI turns ${panelDoc.page_count > 1 ? `all ${panelDoc.page_count} pages` : "this lecture"} into a dense study sheet that fits on about one printed page. Your highlights in the notes count as important.`}
         />
       )}
     </aside>
