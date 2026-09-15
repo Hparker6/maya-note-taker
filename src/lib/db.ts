@@ -84,6 +84,57 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
 );
 `;
 
+// Applied in order on top of SCHEMA; PRAGMA user_version records how many have run.
+const MIGRATIONS: string[] = [
+  // 1: PDFs become editable notes ("imports") alongside the student's own notes.
+  `
+  ALTER TABLE notes ADD COLUMN kind TEXT NOT NULL DEFAULT 'note';
+  ALTER TABLE documents ADD COLUMN import_method TEXT NOT NULL DEFAULT '';
+  ALTER TABLE documents ADD COLUMN imported_at TEXT NOT NULL DEFAULT '';
+  CREATE INDEX IF NOT EXISTS idx_notes_document ON notes(document_id);
+  `,
+  // 2: calendar events (manual + Canvas) and app settings.
+  `
+  CREATE TABLE IF NOT EXISTS events (
+    id                INTEGER PRIMARY KEY,
+    source            TEXT NOT NULL DEFAULT 'manual',
+    external_key      TEXT UNIQUE,
+    title             TEXT NOT NULL,
+    kind              TEXT NOT NULL DEFAULT 'other',
+    kind_locked       INTEGER NOT NULL DEFAULT 0,
+    class_id          INTEGER REFERENCES classes(id) ON DELETE SET NULL,
+    class_locked      INTEGER NOT NULL DEFAULT 0,
+    unit_id           INTEGER REFERENCES units(id) ON DELETE SET NULL,
+    starts_at         TEXT NOT NULL,
+    ends_at           TEXT,
+    all_day           INTEGER NOT NULL DEFAULT 0,
+    location          TEXT NOT NULL DEFAULT '',
+    description       TEXT NOT NULL DEFAULT '',
+    url               TEXT NOT NULL DEFAULT '',
+    points            REAL,
+    weight            REAL,
+    group_name        TEXT NOT NULL DEFAULT '',
+    group_weight      REAL,
+    course_key        TEXT NOT NULL DEFAULT '',
+    course_label      TEXT NOT NULL DEFAULT '',
+    submission_status TEXT NOT NULL DEFAULT '',
+    score             REAL,
+    my_notes          TEXT NOT NULL DEFAULT '',
+    done              INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    synced_at         TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_events_starts ON events(starts_at);
+  CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS course_links (
+    course_key TEXT PRIMARY KEY,
+    label      TEXT NOT NULL DEFAULT '',
+    class_id   INTEGER REFERENCES classes(id) ON DELETE SET NULL
+  );
+  `,
+];
+
 declare global {
   var __mayaDb: Database.Database | undefined;
 }
@@ -95,9 +146,26 @@ export function db(): Database.Database {
     conn.pragma("journal_mode = WAL");
     conn.pragma("foreign_keys = ON");
     conn.exec(SCHEMA);
+    const version = conn.pragma("user_version", { simple: true }) as number;
+    for (let i = version; i < MIGRATIONS.length; i++) {
+      conn.transaction(() => {
+        conn.exec(MIGRATIONS[i]);
+        conn.pragma(`user_version = ${i + 1}`);
+      })();
+    }
     globalThis.__mayaDb = conn;
   }
   return globalThis.__mayaDb;
+}
+
+export function getSetting(key: string): string | null {
+  const row = db().prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string | null) {
+  if (value === null) db().prepare("DELETE FROM settings WHERE key = ?").run(key);
+  else db().prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
 }
 
 export const now = () => new Date().toISOString();

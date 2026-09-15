@@ -1,14 +1,16 @@
 import "server-only";
-import { generateSheet } from "./ai";
+import { generateSheet, transcribeDocument, type GenerationCallbacks } from "./ai";
 import type { JobEvent, JobStatus, SheetScope } from "./types";
 
-// Generation runs in the server process, independent of any request, so the
-// student can upload a stack of PDFs and keep working while they condense.
+// Claude work runs in the server process, independent of any request, so the student
+// can upload a stack of PDFs and keep working while they are processed.
 
 const MAX_CONCURRENT = 2;
 const KEEP_FINISHED_MS = 60_000;
 
-interface Job {
+type Runner = (cb: GenerationCallbacks) => Promise<{ html: string; warning?: string }>;
+
+export interface Job {
   key: string;
   status: JobStatus;
   text: string;
@@ -28,7 +30,8 @@ declare global {
 
 const registry: JobRegistry = (globalThis.__mayaJobs ??= { jobs: new Map(), active: 0, queue: [] });
 
-const keyOf = (scope: SheetScope, id: number) => `${scope}:${id}`;
+export const sheetKey = (scope: SheetScope, id: number) => `${scope}:${id}`;
+export const transcriptKey = (documentId: number) => `transcript:${documentId}`;
 
 function emit(job: Job, event: JobEvent) {
   for (const listener of job.listeners) listener(event);
@@ -48,18 +51,17 @@ function releaseSlot() {
   else registry.active--;
 }
 
-export function isRunning(scope: SheetScope, id: number) {
-  const job = registry.jobs.get(keyOf(scope, id));
+export function getTask(key: string): Job | undefined {
+  return registry.jobs.get(key);
+}
+
+export function isTaskRunning(key: string) {
+  const job = registry.jobs.get(key);
   return Boolean(job && !job.result);
 }
 
-export function runningKeys(): string[] {
-  return [...registry.jobs.values()].filter((j) => !j.result).map((j) => j.key);
-}
-
-/** Starts generation unless it's already running. */
-export function startJob(scope: SheetScope, id: number): Job {
-  const key = keyOf(scope, id);
+/** Starts a task unless one with the same key is already running. */
+export function startTask(key: string, run: Runner): Job {
   const existing = registry.jobs.get(key);
   if (existing && !existing.result) return existing;
 
@@ -69,7 +71,7 @@ export function startJob(scope: SheetScope, id: number): Job {
   void (async () => {
     await acquireSlot();
     try {
-      const { html, warning } = await generateSheet(scope, id, {
+      const { html, warning } = await run({
         status: (s) => {
           if (job.status === s) return;
           job.status = s;
@@ -95,9 +97,10 @@ export function startJob(scope: SheetScope, id: number): Job {
   return job;
 }
 
-export function getJob(scope: SheetScope, id: number): Job | undefined {
-  return registry.jobs.get(keyOf(scope, id));
-}
+export const startSheetJob = (scope: SheetScope, id: number) => startTask(sheetKey(scope, id), (cb) => generateSheet(scope, id, cb));
+export const startTranscriptJob = (documentId: number) =>
+  startTask(transcriptKey(documentId), (cb) => transcribeDocument(documentId, cb));
+export const isRunning = (scope: SheetScope, id: number) => isTaskRunning(sheetKey(scope, id));
 
 /** Replays the job's progress so far, then forwards live events until it ends. */
 export function subscribe(job: Job, listener: (e: JobEvent) => void): () => void {
@@ -109,4 +112,42 @@ export function subscribe(job: Job, listener: (e: JobEvent) => void): () => void
   }
   job.listeners.add(listener);
   return () => job.listeners.delete(listener);
+}
+
+/** NDJSON response that streams a job's events to the browser. */
+export function jobStreamResponse(job: Job | undefined): Response {
+  const encoder = new TextEncoder();
+  const line = (e: JobEvent) => encoder.encode(JSON.stringify(e) + "\n");
+  if (!job) return new Response(line({ t: "idle" }), { headers: { "Content-Type": "application/x-ndjson" } });
+
+  let unsubscribe = () => {};
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let closed = false;
+      unsubscribe = subscribe(job, (event) => {
+        if (closed) return;
+        try {
+          controller.enqueue(line(event));
+        } catch {
+          closed = true;
+        }
+        if (event.t === "done" || event.t === "error") {
+          closed = true;
+          queueMicrotask(() => {
+            unsubscribe();
+            try {
+              controller.close();
+            } catch {}
+          });
+        }
+      });
+    },
+    cancel() {
+      // The client left; the job keeps going and saves on its own.
+      unsubscribe();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" },
+  });
 }

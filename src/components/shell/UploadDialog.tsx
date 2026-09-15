@@ -33,8 +33,8 @@ export function UploadDialog({
       open={open}
       onClose={onClose}
       size="lg"
-      title="Upload course PDFs"
-      description="Drop in the PDFs from your program and choose where they belong."
+      title="Import course PDFs"
+      description="Each PDF becomes an editable note you can highlight and add to. The original stays attached."
     >
       {open && (
         <UploadForm tree={tree} aiReady={aiReady} defaultUnitId={defaultUnitId} initialFiles={initialFiles} onDone={onClose} />
@@ -189,11 +189,15 @@ function UploadForm({
       } catch {}
       if (result.rejected.length) toast(`Skipped ${result.rejected.map((r) => `${r.name} (${r.reason})`).join(", ")}`, "info");
       if (result.created.length) {
+        const n = result.created.length;
+        const scanned = result.created.filter((c) => !c.has_text).length;
         toast(
-          `Uploaded ${result.created.length} PDF${result.created.length > 1 ? "s" : ""}${condense ? " — condensing in the background" : ""}`,
+          `Imported ${n} PDF${n > 1 ? "s" : ""} as editable notes${condense ? " — condensing in the background" : ""}` +
+            (scanned ? `. ${scanned} had no selectable text (scanned) — open ${scanned > 1 ? "them" : "it"} to convert with Claude.` : ""),
         );
       }
-      router.push(`/units/${uId}?tab=pdfs`);
+      const firstNote = result.created.find((c) => c.note_id)?.note_id;
+      router.push(`/units/${uId}?tab=notes${firstNote ? `&note=${firstNote}` : ""}`);
       router.refresh();
       onDone();
     } catch (err) {
@@ -313,7 +317,7 @@ function UploadForm({
         />
         <span className="text-sm">
           <span className="flex items-center gap-1.5 font-medium text-ink">
-            <Sparkles className="size-3.5 text-accent" /> Condense each PDF with Claude
+            <Sparkles className="size-3.5 text-accent" /> Also condense each PDF with Claude
           </span>
           <span className="mt-0.5 block text-[13px] text-ink-3">
             {aiReady
@@ -350,7 +354,10 @@ function isPdfFile(f: File) {
 function uploadWithProgress(
   form: FormData,
   onProgress: (p: number) => void,
-): Promise<{ created: { id: number; title: string }[]; rejected: { name: string; reason: string }[] }> {
+): Promise<{
+  created: { id: number; title: string; note_id: number | null; has_text: boolean }[];
+  rejected: { name: string; reason: string }[];
+}> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/documents");

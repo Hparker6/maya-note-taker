@@ -7,6 +7,7 @@ import type {
   ClassNode,
   ClassRow,
   DocumentRow,
+  NoteKind,
   NoteRow,
   SearchHit,
   SectionRow,
@@ -17,7 +18,7 @@ import type {
   UnitRow,
 } from "./types";
 
-const DOC_COLUMNS = "id, unit_id, title, original_name, size, page_count, created_at";
+const DOC_COLUMNS = "id, unit_id, title, original_name, size, page_count, import_method, imported_at, created_at";
 
 // ───────────────────────────── search index ─────────────────────────────
 
@@ -40,6 +41,7 @@ function unindex(kind: string, ref: string) {
 function cleanupOrphans(storedNames: string[]) {
   const d = db();
   d.exec(`
+    DELETE FROM notes WHERE kind = 'import' AND document_id IS NULL;
     DELETE FROM sheets WHERE scope = 'document' AND scope_id NOT IN (SELECT id FROM documents);
     DELETE FROM sheets WHERE scope = 'unit' AND scope_id NOT IN (SELECT id FROM units);
     DELETE FROM sheets WHERE scope = 'section' AND scope_id NOT IN (SELECT id FROM sections);
@@ -90,7 +92,7 @@ export function getTree(): ClassNode[] {
     .prepare(
       `SELECT u.*,
         (SELECT COUNT(*) FROM documents WHERE unit_id = u.id) AS doc_count,
-        (SELECT COUNT(*) FROM notes WHERE unit_id = u.id) AS note_count,
+        (SELECT COUNT(*) FROM notes WHERE unit_id = u.id AND kind = 'note') AS note_count,
         EXISTS (SELECT 1 FROM sheets WHERE scope = 'unit' AND scope_id = u.id) AS has_sheet
        FROM units u ORDER BY position, id`,
     )
@@ -116,7 +118,7 @@ export function getStats() {
     classes: count("SELECT COUNT(*) AS n FROM classes"),
     documents: count("SELECT COUNT(*) AS n FROM documents"),
     pages: count("SELECT COALESCE(SUM(page_count), 0) AS n FROM documents"),
-    notes: count("SELECT COUNT(*) AS n FROM notes"),
+    notes: count("SELECT COUNT(*) AS n FROM notes WHERE kind = 'note'"),
     sheets: count("SELECT COUNT(*) AS n FROM sheets"),
   };
 }
@@ -134,9 +136,8 @@ export function getRecent(limit = 8): RecentItem[] {
   const rows = d
     .prepare(
       `SELECT * FROM (
-         SELECT 'note' AS kind, n.id AS id, n.title AS title, n.updated_at AS at, n.unit_id AS unit_id FROM notes n
-         UNION ALL
-         SELECT 'document', doc.id, doc.title, doc.created_at, doc.unit_id FROM documents doc
+         SELECT CASE n.kind WHEN 'import' THEN 'document' ELSE 'note' END AS kind,
+                n.id AS id, n.title AS title, n.updated_at AS at, n.unit_id AS unit_id FROM notes n
          UNION ALL
          SELECT 'sheet', s.scope_id, '', s.updated_at, s.scope_id FROM sheets s WHERE s.scope = 'unit'
        ) ORDER BY at DESC LIMIT ?`,
@@ -147,10 +148,8 @@ export function getRecent(limit = 8): RecentItem[] {
     const ctx = getUnitContext(r.unit_id);
     if (!ctx) return [];
     const context = `${ctx.klass.name} › ${ctx.section.name} › ${ctx.unit.name}`;
-    if (r.kind === "note")
+    if (r.kind === "note" || r.kind === "document")
       return [{ kind: r.kind, title: r.title || "Untitled note", href: `/units/${r.unit_id}?tab=notes&note=${r.id}`, context, at: r.at }];
-    if (r.kind === "document")
-      return [{ kind: r.kind, title: r.title, href: `/documents/${r.id}`, context, at: r.at }];
     return [{ kind: r.kind, title: `${ctx.unit.name} study sheet`, href: `/units/${r.unit_id}?tab=sheet`, context, at: r.at }];
   });
 }
@@ -334,6 +333,16 @@ export function deleteDocument(id: number) {
   cleanupOrphans([internals.stored_name]);
 }
 
+export function listDocumentsWithoutImport(unitId?: number) {
+  return db()
+    .prepare(
+      `SELECT d.id, d.unit_id, d.title, d.stored_name FROM documents d
+       WHERE NOT EXISTS (SELECT 1 FROM notes n WHERE n.document_id = d.id AND n.kind = 'import')
+       ${unitId === undefined ? "" : "AND d.unit_id = ?"}`,
+    )
+    .all(...(unitId === undefined ? [] : [unitId])) as { id: number; unit_id: number; title: string; stored_name: string }[];
+}
+
 // ───────────────────────────── notes ─────────────────────────────
 
 export function listNotes(unitId: number) {
@@ -342,36 +351,76 @@ export function listNotes(unitId: number) {
     .all(unitId) as NoteRow[];
 }
 
-export function listDocumentNotes(documentId: number) {
-  return db()
-    .prepare("SELECT * FROM notes WHERE document_id = ? ORDER BY updated_at DESC, id DESC")
-    .all(documentId) as NoteRow[];
-}
-
 export function getNote(id: number) {
   return db().prepare("SELECT * FROM notes WHERE id = ?").get(id) as NoteRow | undefined;
 }
 
-export function createNote(input: { unitId: number; documentId: number | null; title: string; content: string }) {
+export function getImportNote(documentId: number) {
+  return db().prepare("SELECT * FROM notes WHERE document_id = ? AND kind = 'import'").get(documentId) as NoteRow | undefined;
+}
+
+export function createNote(input: { unitId: number; documentId: number | null; title: string; content: string; kind?: NoteKind }) {
   const ts = now();
   const result = db()
-    .prepare("INSERT INTO notes (unit_id, document_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(input.unitId, input.documentId, input.title, input.content, ts, ts);
+    .prepare("INSERT INTO notes (unit_id, document_id, kind, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(input.unitId, input.documentId, input.kind ?? "note", input.title, input.content, ts, ts);
   const id = Number(result.lastInsertRowid);
   indexItem("note", String(id), input.title, htmlToText(input.content));
   return getNote(id)!;
+}
+
+/**
+ * Creates (or replaces the text of) the editable note for a PDF. `imported_at` matches
+ * the note's `updated_at`, so a later `updated_at` means the student has edited it.
+ */
+export function setImportContent(documentId: number, html: string, method: "local" | "claude" | "") {
+  const doc = getDocument(documentId);
+  if (!doc) return undefined;
+  const d = db();
+  const ts = now();
+  const existing = getImportNote(documentId);
+  let noteId: number;
+  d.transaction(() => {
+    if (existing) {
+      d.prepare("UPDATE notes SET content = ?, updated_at = ? WHERE id = ?").run(html, ts, existing.id);
+      noteId = existing.id;
+    } else {
+      noteId = Number(
+        d
+          .prepare("INSERT INTO notes (unit_id, document_id, kind, title, content, created_at, updated_at) VALUES (?, ?, 'import', ?, ?, ?, ?)")
+          .run(doc.unit_id, documentId, doc.title, html, ts, ts).lastInsertRowid,
+      );
+    }
+    d.prepare("UPDATE documents SET import_method = ?, imported_at = ? WHERE id = ?").run(method, ts, documentId);
+  })();
+  // The note is now the searchable copy of the PDF; keep the raw text only when there is no note text.
+  indexItem("note", String(noteId!), doc.title, htmlToText(html));
+  if (htmlToText(html).trim()) unindex("document", String(documentId));
+  return getNote(noteId!)!;
 }
 
 export function updateNote(id: number, patch: { title?: string; content?: string }) {
   const note = getNote(id);
   if (!note) return undefined;
   const next = { ...note, ...patch, updated_at: now() };
-  db().prepare("UPDATE notes SET title = ?, content = ?, updated_at = ? WHERE id = ?").run(next.title, next.content, next.updated_at, id);
+  const d = db();
+  d.transaction(() => {
+    d.prepare("UPDATE notes SET title = ?, content = ?, updated_at = ? WHERE id = ?").run(next.title, next.content, next.updated_at, id);
+    // An imported PDF and its note share one title.
+    if (note.kind === "import" && note.document_id && patch.title !== undefined && patch.title.trim()) {
+      d.prepare("UPDATE documents SET title = ? WHERE id = ?").run(patch.title.trim(), note.document_id);
+    }
+  })();
   indexItem("note", String(id), next.title, htmlToText(next.content));
   return next;
 }
 
 export function deleteNote(id: number) {
+  const note = getNote(id);
+  if (note?.kind === "import" && note.document_id) {
+    deleteDocument(note.document_id);
+    return;
+  }
   db().prepare("DELETE FROM notes WHERE id = ?").run(id);
   unindex("note", String(id));
 }
@@ -488,16 +537,21 @@ export function search(q: string, limit = 25): SearchHit[] {
       const note = getNote(Number(r.ref));
       const ctx = note && getUnitContext(note.unit_id);
       if (!note || !ctx) return [];
-      const href = note.document_id
-        ? `/documents/${note.document_id}?panel=notes&note=${note.id}`
-        : `/units/${note.unit_id}?tab=notes&note=${note.id}`;
-      return [{ kind: "note", title: r.title || "Untitled note", snippet: r.snippet, href, context: `${ctx.klass.name} › ${ctx.unit.name}` }];
+      return [
+        {
+          kind: note.kind === "import" ? "document" : "note",
+          title: r.title || "Untitled note",
+          snippet: r.snippet,
+          href: `/units/${note.unit_id}?tab=notes&note=${note.id}`,
+          context: `${ctx.klass.name} › ${ctx.unit.name}`,
+        },
+      ];
     }
     const [scope, id] = r.ref.split(":");
     const scopeId = Number(id);
     if (scope === "document") {
       const doc = getDocument(scopeId);
-      return doc ? [{ kind: "sheet", title: r.title, snippet: r.snippet, href: `/documents/${scopeId}`, context: "Condensed PDF" }] : [];
+      return doc ? [{ kind: "sheet", title: r.title, snippet: r.snippet, href: `/documents/${scopeId}?panel=sheet`, context: "Condensed PDF" }] : [];
     }
     if (scope === "unit") {
       const ctx = getUnitContext(scopeId);

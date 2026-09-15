@@ -3,13 +3,14 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { UnitView, type UnitTab } from "@/components/views/UnitView";
 import { aiConfigured } from "@/lib/ai";
-import { isRunning } from "@/lib/jobs";
-import { getUnitContext, listDocumentsWithStatus, listNotes } from "@/lib/repo";
+import { ensureImports } from "@/lib/imports";
+import { isRunning, isTaskRunning, transcriptKey } from "@/lib/jobs";
+import { getUnitContext, listDocuments, listNotes } from "@/lib/repo";
 import { sheetState } from "@/lib/sheets";
 
 type Props = {
   params: Promise<{ unitId: string }>;
-  searchParams: Promise<{ tab?: string; note?: string }>;
+  searchParams: Promise<{ tab?: string; note?: string; panel?: string }>;
 };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -22,24 +23,28 @@ export default async function UnitPage({ params, searchParams }: Props) {
   const id = Number((await params).unitId);
   const ctx = getUnitContext(id);
   if (!ctx) notFound();
-  const { tab, note } = await searchParams;
+  await ensureImports(id);
+  const { tab, note, panel } = await searchParams;
 
-  const documents = listDocumentsWithStatus(id).map((d) => ({ ...d, condensing: isRunning("document", d.id) }));
-  const notes = listNotes(id);
-  const sheet = sheetState("unit", id);
-  const defaultTab: UnitTab = sheet.sheet || sheet.running ? "sheet" : "pdfs";
-  const initialTab: UnitTab = tab === "sheet" || tab === "pdfs" || tab === "notes" ? tab : defaultTab;
+  const documents = listDocuments(id).map((d) => ({
+    ...d,
+    condensing: isRunning("document", d.id),
+    transcribing: isTaskRunning(transcriptKey(d.id)),
+    sheet: sheetState("document", d.id),
+  }));
+  const initialTab: UnitTab = tab === "sheet" ? "sheet" : "notes";
 
   return (
     <UnitView
       key={id}
       ctx={ctx}
       documents={documents}
-      notes={notes}
-      sheet={sheet}
+      notes={listNotes(id)}
+      sheet={sheetState("unit", id)}
       aiReady={aiConfigured()}
       initialTab={initialTab}
       initialNoteId={note ? Number(note) : undefined}
+      initialPanel={panel === "pdf" || panel === "sheet" ? panel : undefined}
     />
   );
 }

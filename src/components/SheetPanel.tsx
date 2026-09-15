@@ -17,8 +17,9 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, countWords, estimatePages } from "@/lib/client";
+import { consumeJobStream } from "@/lib/job-client";
 import { markdownToHtml } from "@/lib/markdown";
-import type { JobEvent, JobStatus, SheetRow, SheetScope, SheetState } from "@/lib/types";
+import type { JobStatus, SheetRow, SheetScope, SheetState } from "@/lib/types";
 import { useAutosave } from "@/lib/useAutosave";
 import { RichEditor } from "./editor/RichEditor";
 import { RelativeTime } from "./RelativeTime";
@@ -88,64 +89,37 @@ export function SheetPanel({
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-
-      let markdown = "";
       let lastRender = 0;
-      try {
-        const res = await fetch(`/api/sheets/${scope}/${scopeId}/stream`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ start }),
-          signal: controller.signal,
-        });
-        if (!res.ok || !res.body) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error ?? "Couldn't start generating.");
-        }
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          let newline: number;
-          while ((newline = buffer.indexOf("\n")) >= 0) {
-            const line = buffer.slice(0, newline).trim();
-            buffer = buffer.slice(newline + 1);
-            if (!line) continue;
-            const event = JSON.parse(line) as JobEvent;
-            if (event.t === "idle") {
-              setGen(null);
-            } else if (event.t === "status") {
-              setGen((g) => ({ status: event.v, html: g?.html ?? "", startedAt: g?.startedAt ?? Date.now() }));
-            } else if (event.t === "delta") {
-              markdown += event.v;
-              const t = performance.now();
-              if (t - lastRender > 80) {
-                lastRender = t;
-                const html = DOMPurify.sanitize(markdownToHtml(markdown));
-                setGen((g) => (g ? { ...g, status: "writing", html } : g));
-              }
-            } else if (event.t === "done") {
-              const ts = new Date().toISOString();
-              setSheet({ content: event.html, generated_at: ts, updated_at: ts });
-              setStale(false);
-              setGen(null);
-              if (event.warning) toast(event.warning, "info");
-              else if (start) toast("Study sheet ready");
-              router.refresh();
-            } else if (event.t === "error") {
-              setGen(null);
-              setError(event.message);
-            }
-          }
-        }
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        setGen(null);
-        setError(err instanceof Error ? err.message : "Lost connection while generating.");
-      }
+
+      await consumeJobStream(
+        `/api/sheets/${scope}/${scopeId}/stream`,
+        start,
+        {
+          idle: () => setGen(null),
+          status: (v) => setGen((g) => ({ status: v, html: g?.html ?? "", startedAt: g?.startedAt ?? Date.now() })),
+          text: (markdown) => {
+            const t = performance.now();
+            if (t - lastRender < 80) return;
+            lastRender = t;
+            const html = DOMPurify.sanitize(markdownToHtml(markdown));
+            setGen((g) => (g ? { ...g, status: "writing", html } : g));
+          },
+          done: (event) => {
+            const ts = new Date().toISOString();
+            setSheet({ content: event.html, generated_at: ts, updated_at: ts });
+            setStale(false);
+            setGen(null);
+            if (event.warning) toast(event.warning, "info");
+            else if (start) toast("Study sheet ready");
+            router.refresh();
+          },
+          error: (message) => {
+            setGen(null);
+            setError(message);
+          },
+        },
+        controller.signal,
+      );
     },
     [scope, scopeId, router, toast],
   );
@@ -153,7 +127,6 @@ export function SheetPanel({
   // Reattach to a generation that's already running (e.g. auto-condense after upload).
   // consume() subscribes to a server stream; its state updates all happen after awaits.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (initial.running) void consume(false);
     return () => abortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps

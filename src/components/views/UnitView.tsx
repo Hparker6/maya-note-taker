@@ -1,14 +1,11 @@
 "use client";
 
 import clsx from "clsx";
-import { FileText, MoreHorizontal, NotebookPen, Pencil, Sparkles, Trash2, UploadCloud } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { MoreHorizontal, NotebookPen, Pencil, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { useState } from "react";
 import { classColor } from "@/lib/colors";
-import type { DocumentListItem } from "@/lib/repo";
-import type { NoteRow, SheetState, UnitContext } from "@/lib/types";
-import { DocumentList } from "../DocumentList";
-import { NotesWorkspace } from "../NotesWorkspace";
+import type { NoteRow, SheetState, UnitContext, WorkspaceDocument } from "@/lib/types";
+import { NotesWorkspace, type SidePanel } from "../NotesWorkspace";
 import { Breadcrumbs } from "../PageHeader";
 import { SheetPanel } from "../SheetPanel";
 import { useShell } from "../shell/ShellContext";
@@ -16,8 +13,7 @@ import { useTreeActions } from "../shell/useTreeActions";
 import { Button, buttonClass } from "../ui/Button";
 import { Menu } from "../ui/Menu";
 
-export type UnitTab = "sheet" | "pdfs" | "notes";
-export type UnitDocument = DocumentListItem & { condensing: boolean };
+export type UnitTab = "notes" | "sheet";
 
 export function UnitView({
   ctx,
@@ -27,43 +23,50 @@ export function UnitView({
   aiReady,
   initialTab,
   initialNoteId,
+  initialPanel,
 }: {
   ctx: UnitContext;
-  documents: UnitDocument[];
+  documents: WorkspaceDocument[];
   notes: NoteRow[];
   sheet: SheetState;
   aiReady: boolean;
   initialTab: UnitTab;
   initialNoteId?: number;
+  initialPanel?: SidePanel;
 }) {
-  const router = useRouter();
   const { openUpload } = useShell();
   const actions = useTreeActions();
   const [tab, setTab] = useState<UnitTab>(initialTab);
-  const refresh = useCallback(() => router.refresh(), [router]);
   const { unit, section, klass } = ctx;
+
+  // A link to a specific note (search, upload) always opens the notes tab.
+  const [seenNote, setSeenNote] = useState(initialNoteId);
+  if (seenNote !== initialNoteId) {
+    setSeenNote(initialNoteId);
+    if (initialNoteId) setTab("notes");
+  }
 
   const switchTab = (next: UnitTab) => {
     setTab(next);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", next);
     url.searchParams.delete("note");
+    url.searchParams.delete("panel");
     window.history.replaceState(null, "", url);
   };
 
-  const noteWords = notes.some((n) => n.content.replace(/<[^>]+>/g, "").trim());
+  const ownNotes = notes.filter((n) => n.kind === "note" && n.content.replace(/<[^>]+>/g, "").trim());
   const pages = documents.reduce((n, d) => n + d.page_count, 0);
   const sources = [
-    documents.length ? `${documents.length} PDF${documents.length > 1 ? "s" : ""} (${pages} pages)` : "",
-    notes.length ? `${notes.length} note${notes.length > 1 ? "s" : ""}` : "",
+    documents.length ? `${documents.length} lecture${documents.length > 1 ? "s" : ""} (${pages} pages)` : "",
+    ownNotes.length ? `${ownNotes.length} note${ownNotes.length > 1 ? "s" : ""}` : "",
   ]
     .filter(Boolean)
     .join(" + ");
 
-  const tabs: { id: UnitTab; label: string; short: string; icon: typeof FileText; count?: number }[] = [
-    { id: "sheet", label: "Study sheet", short: "Sheet", icon: Sparkles },
-    { id: "pdfs", label: "Curriculum PDFs", short: "PDFs", icon: FileText, count: documents.length },
-    { id: "notes", label: "My notes", short: "Notes", icon: NotebookPen, count: notes.length },
+  const tabs = [
+    { id: "notes" as const, label: "Notes", icon: NotebookPen, count: notes.length },
+    { id: "sheet" as const, label: "Study sheet", icon: Sparkles, count: undefined },
   ];
 
   return (
@@ -79,7 +82,7 @@ export function UnitView({
           <h1 className="min-w-0 font-serif text-[28px] leading-tight font-semibold tracking-tight sm:text-[32px]">{unit.name}</h1>
           <div className="flex items-center gap-2">
             <Button variant="primary" onClick={() => openUpload({ unitId: unit.id })}>
-              <UploadCloud /> Upload PDFs
+              <UploadCloud /> Import PDFs
             </Button>
             <Menu
               triggerClassName={buttonClass("ghost", "icon")}
@@ -98,7 +101,7 @@ export function UnitView({
           </div>
         </div>
         <div role="tablist" className="-mb-px mt-5 flex gap-1 overflow-x-auto">
-          {tabs.map(({ id, label, short, icon: Icon, count }) => (
+          {tabs.map(({ id, label, icon: Icon, count }) => (
             <button
               key={id}
               role="tab"
@@ -110,8 +113,7 @@ export function UnitView({
               )}
             >
               <Icon className="size-4" />
-              <span className="sm:hidden">{short}</span>
-              <span className="hidden sm:inline">{label}</span>
+              {label}
               {count !== undefined && (
                 <span
                   className={clsx(
@@ -128,27 +130,25 @@ export function UnitView({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col bg-card">
-        {tab === "sheet" && (
+        {tab === "sheet" ? (
           <SheetPanel
             scope="unit"
             scopeId={unit.id}
             initial={sheet}
             aiReady={aiReady}
-            blockedReason={!documents.length && !noteWords ? "Upload a PDF or write a note in this unit first." : undefined}
+            blockedReason={!documents.length && !ownNotes.length ? "Import a PDF or write a note in this unit first." : undefined}
             emptyTitle="Build this unit's study sheet"
-            emptyBody="Claude reads every PDF here plus your own notes, then writes one dense, organized sheet — your notes marked with ★ — sized to print on one or two pages."
+            emptyBody="Claude reads every lecture here — including your edits and highlights — plus your own notes, then writes one dense, organized sheet sized to print on one or two pages."
             sourceSummary={sources || undefined}
           />
-        )}
-        {tab === "pdfs" && (
-          <DocumentList unitId={unit.id} documents={documents} aiReady={aiReady} onChanged={refresh} />
-        )}
-        {tab === "notes" && (
+        ) : (
           <NotesWorkspace
             unitId={unit.id}
             notes={notes}
+            documents={documents}
+            aiReady={aiReady}
             initialNoteId={initialNoteId}
-            documentTitles={Object.fromEntries(documents.map((d) => [d.id, d.title]))}
+            initialPanel={initialPanel}
           />
         )}
       </div>

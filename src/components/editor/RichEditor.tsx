@@ -1,6 +1,8 @@
 "use client";
 
+import { Extension } from "@tiptap/core";
 import { Highlight } from "@tiptap/extension-highlight";
+import { Selection } from "@tiptap/pm/state";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { Subscript } from "@tiptap/extension-subscript";
 import { Superscript } from "@tiptap/extension-superscript";
@@ -17,8 +19,27 @@ import { EditorBubbleMenu } from "./EditorBubbleMenu";
 import { EditorToolbar } from "./EditorToolbar";
 import { SelectionSync } from "./selection-sync";
 
+const exitTopHandlers = new WeakMap<Editor, () => void>();
+
+/** Arrow-up from the very start of the document hands focus back (e.g. to a title field). */
+const ExitTop = Extension.create({
+  name: "exitTop",
+  addKeyboardShortcuts() {
+    return {
+      ArrowUp: ({ editor }) => {
+        const handler = exitTopHandlers.get(editor as Editor);
+        const { selection, doc } = editor.state;
+        if (!handler || !selection.empty || selection.from !== Selection.atStart(doc).from) return false;
+        handler();
+        return true;
+      },
+    };
+  },
+});
+
 export function createExtensions(placeholder: string) {
   return [
+    ExitTop,
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
       link: { openOnClick: false, autolink: true, defaultProtocol: "https" },
@@ -51,6 +72,7 @@ export function RichEditor({
   contentClassName,
   toolbarClassName,
   onReady,
+  onExitTop,
 }: {
   content: string;
   onUpdate?: (html: string) => void;
@@ -63,6 +85,8 @@ export function RichEditor({
   contentClassName?: string;
   toolbarClassName?: string;
   onReady?: (editor: Editor) => void;
+  /** Called on Arrow-up at the start of the document. */
+  onExitTop?: () => void;
 }) {
   const onUpdateRef = useRef(onUpdate);
   useEffect(() => {
@@ -91,6 +115,12 @@ export function RichEditor({
   useEffect(() => {
     if (editor && onReady) onReady(editor);
   }, [editor, onReady]);
+
+  useEffect(() => {
+    if (!editor) return;
+    if (onExitTop) exitTopHandlers.set(editor, onExitTop);
+    else exitTopHandlers.delete(editor);
+  }, [editor, onExitTop]);
 
   if (!editor) {
     return (

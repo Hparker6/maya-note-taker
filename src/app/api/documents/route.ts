@@ -1,6 +1,8 @@
 import { aiConfigured } from "@/lib/ai";
+import { sanitizeRichHtml } from "@/lib/html";
 import { badRequest, handler, notFound, optionalInt } from "@/lib/http";
-import { startJob } from "@/lib/jobs";
+import { importExtracted } from "@/lib/imports";
+import { startSheetJob } from "@/lib/jobs";
 import { extractPdf, isPdf } from "@/lib/pdf";
 import { createDocument, getUnitContext } from "@/lib/repo";
 import { deleteStoredFile, saveFile } from "@/lib/storage";
@@ -30,7 +32,7 @@ export const POST = handler(async (request: Request) => {
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
   if (!files.length) throw badRequest("Choose at least one PDF.");
 
-  const created: { id: number; title: string }[] = [];
+  const created: { id: number; title: string; note_id: number | null; has_text: boolean }[] = [];
   const rejected: { name: string; reason: string }[] = [];
 
   for (const file of files) {
@@ -44,11 +46,11 @@ export const POST = handler(async (request: Request) => {
       continue;
     }
 
-    let extracted = { pageCount: 0, text: "" };
+    let extracted = { pageCount: 0, text: "", html: "", scanned: true };
     try {
       extracted = await extractPdf(bytes);
     } catch (err) {
-      // Encrypted or malformed PDFs still upload; they just aren't searchable.
+      // Encrypted or malformed PDFs still upload; they just have no editable text yet.
       console.warn(`[upload] text extraction failed for ${file.name}:`, err);
     }
 
@@ -64,7 +66,8 @@ export const POST = handler(async (request: Request) => {
         pageCount: extracted.pageCount,
         text: extracted.text,
       });
-      created.push({ id, title });
+      const note = importExtracted(id, { html: sanitizeRichHtml(extracted.html), scanned: extracted.scanned });
+      created.push({ id, title, note_id: note?.id ?? null, has_text: !extracted.scanned });
     } catch (err) {
       deleteStoredFile(storedName);
       throw err;
@@ -72,7 +75,7 @@ export const POST = handler(async (request: Request) => {
   }
 
   if (form.get("condense") === "1" && aiConfigured()) {
-    for (const doc of created) startJob("document", doc.id);
+    for (const doc of created) startSheetJob("document", doc.id);
   }
 
   return Response.json({ created, rejected }, { status: created.length ? 201 : 400 });
