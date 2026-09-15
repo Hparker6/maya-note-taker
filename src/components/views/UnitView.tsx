@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Brain, MoreHorizontal, NotebookPen, Pencil, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { Brain, MoreHorizontal, NotebookPen, Pencil, Share2, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { useState } from "react";
 import { classColor } from "@/lib/colors";
 import type { NoteRow, SheetState, UnitContext, UnitPracticeData, WorkspaceDocument } from "@/lib/types";
@@ -37,7 +37,7 @@ export function UnitView({
   initialNoteId?: number;
   initialPanel?: SidePanel;
 }) {
-  const { openUpload } = useShell();
+  const { openUpload, openShare } = useShell();
   const actions = useTreeActions();
   const [tab, setTab] = useState<UnitTab>(initialTab);
   const { unit, section, klass } = ctx;
@@ -92,6 +92,7 @@ export function UnitView({
               triggerClassName={buttonClass("ghost", "icon")}
               trigger={<MoreHorizontal />}
               items={[
+                { label: "Share unit", icon: <Share2 />, onSelect: () => openShare({ scope: "unit", id: unit.id, title: unit.name }) },
                 { label: "Rename unit", icon: <Pencil />, onSelect: () => actions.renameUnit(unit) },
                 {
                   label: "Delete unit",

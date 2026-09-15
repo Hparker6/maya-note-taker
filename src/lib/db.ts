@@ -215,6 +215,18 @@ const MIGRATIONS: string[] = [
   ALTER TABLE course_links ADD COLUMN weighted INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE course_links ADD COLUMN grades_synced_at TEXT;
   `,
+  // 6: read-only share links for classmates.
+  `
+  CREATE TABLE IF NOT EXISTS shares (
+    token       TEXT PRIMARY KEY,
+    scope       TEXT NOT NULL CHECK (scope IN ('class', 'unit', 'note')),
+    scope_id    INTEGER NOT NULL,
+    include     TEXT NOT NULL DEFAULT '{}',
+    views       INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_shares_scope ON shares(scope, scope_id);
+  `,
 ];
 
 declare global {

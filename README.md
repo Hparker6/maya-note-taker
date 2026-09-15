@@ -19,6 +19,9 @@ The app runs on your own computer and opens in your web browser. Your notes stay
   - XP, a daily goal, a streak, and a Practice hub showing every deck, what's due, and upcoming exams from your calendar.
 - **Calendar + Canvas.** Click **Connect Canvas** at the bottom of the sidebar. Paste your Canvas calendar feed link (the one you'd give Google Calendar) to bring in every assignment, quiz and exam. Add a Canvas access token to also get points, % of final grade and submission status. You can add your own events, link events to units, and see the week at a glance on the home page.
 - **Grades.** With a Canvas access token, the **Grades** page shows your current grade in each class and each assignment's score. It also shows how much each assignment is worth toward your final grade and how much of that you earned, plus how much of the course is still to come.
+- **Share with classmates.** Click **Share** on a class, unit (**⋯** menu) or note (bottom bar). Choose what to include: your notes and handwriting, lecture notes, study sheets, and flashcards and quiz questions. Then:
+  - **Send a file.** One page that opens in any browser and can be printed. Classmates who have this app can import it with **+** next to Classes → **Import shared notes**.
+  - **Share a link.** A read-only page. It works for classmates on the same Wi-Fi while your computer is on and the app is running, or anywhere if the app is hosted online. You can stop sharing a link at any time.
 - **Search** (`Ctrl/⌘ + K`), dark mode, mobile layout, optional password.
 
 ## Set it up
@@ -224,6 +227,7 @@ src/
   lib/canvas.ts       Canvas feed + API sync
   lib/grades.ts       grades from Canvas: scores, weights, class grades
   lib/ink.ts          handwriting on the page (format + validation)
+  lib/share*.ts       share links, share files (render + import)
   scripts/windows/    desktop shortcut, background launcher, stop
   proxy.ts            optional password gate
 ```

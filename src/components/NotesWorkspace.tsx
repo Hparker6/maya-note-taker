@@ -12,6 +12,7 @@ import {
   FileSearch,
   FileText,
   RefreshCw,
+  Share2,
   FolderInput,
   MoreHorizontal,
   NotebookPen,
@@ -82,7 +83,7 @@ export function NotesWorkspace({
   initialPanel?: SidePanel;
 }) {
   const router = useRouter();
-  const { openUpload, openAiSettings, tree } = useShell();
+  const { openUpload, openAiSettings, openShare, tree } = useShell();
   const { toast, confirm } = useFeedback();
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   const isWide = useMediaQuery("(min-width: 1680px)");
@@ -622,7 +623,14 @@ export function NotesWorkspace({
           footer={(ed) => (
             <div className={clsx("flex items-center justify-between border-t border-line py-2 text-xs text-ink-3", pad)}>
               <WordCount editor={ed} />
-              <button onClick={() => remove(selected)} className="flex items-center gap-1.5 hover:text-danger">
+              <button
+                onClick={() => openShare({ scope: "note", id: selected.id, title: selected.title || "Untitled note" })}
+                className="ml-auto flex items-center gap-1.5 hover:text-accent"
+                title="Share with classmates"
+              >
+                <Share2 className="size-3.5" /> Share
+              </button>
+              <button onClick={() => remove(selected)} className="ml-4 flex items-center gap-1.5 hover:text-danger">
                 <Trash2 className="size-3.5" /> {isImport ? "Delete lecture" : "Delete"}
               </button>
             </div>

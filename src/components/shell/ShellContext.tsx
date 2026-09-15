@@ -9,6 +9,7 @@ export interface ShellApi {
   aiProvider: AiProvider | null;
   openAiSettings: () => void;
   openCanvas: () => void;
+  openShare: (target: { scope: "class" | "unit" | "note"; id: number; title: string }) => void;
   canvas: CanvasSummary;
   /** Cards due (or new) across all classes. */
   practiceDue: number;

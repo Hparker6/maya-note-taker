@@ -398,9 +398,15 @@ export function DrawingView({ node, updateAttributes, deleteNode, editor }: Reac
           <ToolbarButton label="Delete sketch" onClick={() => deleteNode()} className="hover:bg-danger-soft hover:text-danger">
             <Trash2 />
           </ToolbarButton>
-          <ToolbarButton label="Done drawing" onClick={() => setActive(false)} className="bg-accent text-accent-ink hover:bg-accent-hover hover:text-accent-ink">
+          <button
+            type="button"
+            title="Done drawing"
+            aria-label="Done drawing"
+            onClick={() => setActive(false)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3 text-[13px] font-semibold text-accent-ink transition-colors hover:bg-accent-hover [&_svg]:size-[18px]"
+          >
             <Check /> Done
-          </ToolbarButton>
+          </button>
         </div>
       )}
 

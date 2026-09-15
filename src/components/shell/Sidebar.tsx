@@ -8,6 +8,7 @@ import {
   Award,
   BookMarked,
   Brain,
+  FileDown,
   CalendarDays,
   ChevronRight,
   FolderPlus,
@@ -27,13 +28,15 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { api } from "@/lib/client";
 import { APP_NAME } from "@/lib/brand";
 import { classColor } from "@/lib/colors";
 import { RelativeTime } from "../RelativeTime";
 import type { ClassNode } from "@/lib/types";
 import { useHydrated, useIsDarkTheme, useLocalStorage } from "@/lib/useStorage";
 import { Button } from "../ui/Button";
+import { useFeedback } from "../ui/feedback";
 import { Menu } from "../ui/Menu";
 import { mod } from "../editor/palette";
 import { useShell } from "./ShellContext";
@@ -52,6 +55,8 @@ export function Sidebar({
 }) {
   const { tree, aiReady, aiProvider, openAiSettings, openCanvas, canvas, practiceDue, openUpload, openSearch, openClassDialog } = useShell();
   const actions = useTreeActions();
+  const { toast } = useFeedback();
+  const importInput = useRef<HTMLInputElement>(null);
   const pathname = usePathname();
   const router = useRouter();
   const dark = useIsDarkTheme();
@@ -114,6 +119,20 @@ export function Sidebar({
     const next = dark ? "light" : "dark";
     document.documentElement.dataset.theme = next;
     setTheme(next);
+  };
+
+  const importShared = async (file: File) => {
+    const form = new FormData();
+    form.set("file", file);
+    try {
+      const result = await api<{ classId: number; notes: number }>("/api/share/import", { form });
+      toast(`Imported ${result.notes} note${result.notes === 1 ? "" : "s"} from a classmate`);
+      router.push(`/classes/${result.classId}`);
+      router.refresh();
+      onNavigate?.();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't import that file", "error");
+    }
   };
 
   const signOut = async () => {
@@ -188,14 +207,27 @@ export function Sidebar({
 
         <div className="mt-5 mb-1 flex items-center justify-between px-2">
           <span className="text-[11px] font-semibold tracking-wider text-ink-3 uppercase">Classes</span>
-          <button
-            onClick={() => openClassDialog()}
-            className="grid size-6 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-ink"
-            title="New class"
-            aria-label="New class"
-          >
-            <Plus className="size-4" />
-          </button>
+          <Menu
+            label="Add a class"
+            triggerClassName="grid size-6 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-ink aria-expanded:bg-hover"
+            trigger={<Plus className="size-4" />}
+            items={[
+              { label: "New class", icon: <GraduationCap />, onSelect: () => openClassDialog() },
+              { label: "Import shared notes", icon: <FileDown />, onSelect: () => importInput.current?.click() },
+            ]}
+          />
+          <input
+            ref={importInput}
+            type="file"
+            accept=".html,.htm,.json,text/html,application/json"
+            className="hidden"
+            aria-label="Import shared notes file"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void importShared(file);
+            }}
+          />
         </div>
 
         {!tree.length && (

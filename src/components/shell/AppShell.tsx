@@ -11,6 +11,7 @@ import { StudySession, type StudyRequest } from "../practice/StudySession";
 import { FeedbackProvider } from "../ui/feedback";
 import { AiSettingsDialog } from "./AiSettingsDialog";
 import { CanvasSettingsDialog } from "./CanvasSettingsDialog";
+import { ShareDialog, type ShareTarget } from "./ShareDialog";
 import { ClassDialog } from "./ClassDialog";
 import { SearchPalette } from "./SearchPalette";
 import { ShellContext, type CanvasSummary, type ShellApi } from "./ShellContext";
@@ -39,6 +40,7 @@ export function AppShell({
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
   const [study, setStudy] = useState<{ request: StudyRequest; nonce: number } | null>(null);
   const [studyVersion, setStudyVersion] = useState(0);
   const [classDialog, setClassDialog] = useState<{ klass?: ClassRow } | null>(null);
@@ -65,6 +67,7 @@ export function AppShell({
   const openClassDialog = useCallback((klass?: ClassRow) => setClassDialog({ klass }), []);
   const openAiSettings = useCallback(() => setAiSettingsOpen(true), []);
   const openCanvas = useCallback(() => setCanvasOpen(true), []);
+  const openShare = useCallback((target: ShareTarget) => setShareTarget(target), []);
   const startStudy = useCallback((request: StudyRequest) => setStudy({ request, nonce: Date.now() }), []);
   const endStudy = useCallback(() => {
     setStudy(null);
@@ -73,8 +76,8 @@ export function AppShell({
   }, [router]);
 
   const api = useMemo<ShellApi>(
-    () => ({ tree, aiReady, aiProvider, openAiSettings, openCanvas, canvas, practiceDue, startStudy, studyVersion, openUpload, openSearch, openClassDialog, setActiveUnit }),
-    [tree, aiReady, aiProvider, openAiSettings, openCanvas, canvas, practiceDue, startStudy, studyVersion, openUpload, openSearch, openClassDialog],
+    () => ({ tree, aiReady, aiProvider, openAiSettings, openCanvas, openShare, canvas, practiceDue, startStudy, studyVersion, openUpload, openSearch, openClassDialog, setActiveUnit }),
+    [tree, aiReady, aiProvider, openAiSettings, openCanvas, openShare, canvas, practiceDue, startStudy, studyVersion, openUpload, openSearch, openClassDialog],
   );
 
   // Tell the server the browser's time zone so "due today" and streaks follow the student's day.
@@ -210,6 +213,7 @@ export function AppShell({
         <ClassDialog open={Boolean(classDialog)} klass={classDialog?.klass} onClose={() => setClassDialog(null)} />
         <AiSettingsDialog open={aiSettingsOpen} onClose={() => setAiSettingsOpen(false)} />
         <CanvasSettingsDialog open={canvasOpen} onClose={() => setCanvasOpen(false)} tree={tree} />
+        <ShareDialog key={shareTarget ? `${shareTarget.scope}:${shareTarget.id}` : "none"} target={shareTarget} onClose={() => setShareTarget(null)} />
         {study && (
           <StudySession
             key={study.nonce}

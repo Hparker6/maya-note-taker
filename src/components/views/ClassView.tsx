@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   NotebookPen,
   Pencil,
+  Share2,
   Plus,
   Sparkles,
   Trash2,
@@ -25,7 +26,7 @@ import { Button, buttonClass } from "../ui/Button";
 import { Menu } from "../ui/Menu";
 
 export function ClassView({ klass }: { klass: ClassNode }) {
-  const { openClassDialog, openUpload } = useShell();
+  const { openClassDialog, openUpload, openShare } = useShell();
   const actions = useTreeActions();
   const color = classColor(klass.color);
 
@@ -45,6 +46,9 @@ export function ClassView({ klass }: { klass: ClassNode }) {
           }
           actions={
             <>
+              <Button onClick={() => openShare({ scope: "class", id: klass.id, title: klass.name })}>
+                <Share2 /> Share
+              </Button>
               <Button onClick={() => openClassDialog(klass)}>
                 <Pencil /> Edit class
               </Button>
