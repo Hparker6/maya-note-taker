@@ -1,5 +1,19 @@
 // Browser-side helpers.
 
+/** A request the server answered with an error. Network failures throw a plain TypeError instead. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public data: Record<string, unknown>,
+  ) {
+    super(message);
+  }
+}
+
+/** Worth trying again later: the network or server hiccuped, rather than the request being wrong. */
+export const isRetryable = (err: unknown) => !(err instanceof ApiError) || err.status >= 500 || [408, 425, 429].includes(err.status);
+
 export async function api<T = unknown>(
   url: string,
   init: { method?: string; json?: unknown; form?: FormData; signal?: AbortSignal } = {},
@@ -10,15 +24,18 @@ export async function api<T = unknown>(
     body: init.form ?? (init.json !== undefined ? JSON.stringify(init.json) : undefined),
     signal: init.signal,
   });
-  const data = await res.json().catch(() => ({}));
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (res.status === 401) {
-    // Session expired: a full reload to the login page is intentional here.
+    // Session expired: a full reload to the login page is intentional here (unsaved notes are kept as drafts).
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
   }
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `Request failed (${res.status})`);
+  if (!res.ok) throw new ApiError(typeof data.error === "string" ? data.error : `Request failed (${res.status})`, res.status, data);
   return data as T;
 }
+
+/** A short random id (works on plain http, e.g. an iPad on the same Wi-Fi, where crypto.randomUUID doesn't). */
+export const randomKey = () => Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
 
 export function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;

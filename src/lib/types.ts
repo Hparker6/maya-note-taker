@@ -55,7 +55,10 @@ export interface NoteRow {
   /** "" or "roomy" (extra space between lines for writing). */
   line_spacing: string;
   created_at: string;
+  /** Version of the title and text. */
   updated_at: string;
+  /** Version of the handwriting and line spacing ("" until first saved). */
+  ink_updated_at: string;
 }
 
 export interface SheetRow {

@@ -73,15 +73,28 @@ export function deleteCard(id: number) {
   return db().prepare("DELETE FROM cards WHERE id = ?").run(id).changes > 0;
 }
 
-export function reviewCard(id: number, rating: Rating, today: string) {
-  const card = getCard(id);
-  if (!card) return undefined;
-  const next = schedule(card, rating);
-  const at = now();
-  db()
-    .prepare("UPDATE cards SET ease = ?, interval_days = ?, reps = ?, lapses = ?, due_day = ?, last_reviewed_at = ?, updated_at = ? WHERE id = ?")
-    .run(next.ease, next.interval_days, next.reps, next.lapses, addDays(today, next.interval_days), at, at, id);
-  return getCard(id);
+/** `key` identifies one answer, so a review the browser re-sends after a dropped connection counts once. */
+export function reviewCard(id: number, rating: Rating, today: string, key = "") {
+  const d = db();
+  return d.transaction(() => {
+    const card = getCard(id);
+    if (!card) return undefined;
+    if (key && d.prepare("SELECT 1 FROM cards WHERE id = ? AND last_review_key = ?").get(id, key)) return card;
+    const next = schedule(card, rating);
+    const at = now();
+    d.prepare("UPDATE cards SET ease = ?, interval_days = ?, reps = ?, lapses = ?, due_day = ?, last_reviewed_at = ?, last_review_key = ?, updated_at = ? WHERE id = ?").run(
+      next.ease,
+      next.interval_days,
+      next.reps,
+      next.lapses,
+      addDays(today, next.interval_days),
+      at,
+      key,
+      at,
+      id,
+    );
+    return getCard(id);
+  })();
 }
 
 /** Finds cards in every note and study sheet of a unit and adds the ones it doesn't have yet. */
@@ -444,11 +457,14 @@ export function logStudy(input: {
   seconds: number;
   missedCardIds: number[];
   questionResults: { id: number; correct: boolean }[];
+  /** Identifies the session, so a log the browser re-sends is recorded once. */
+  clientKey?: string;
 }) {
   const d = db();
   d.transaction(() => {
+    if (input.clientKey && d.prepare("SELECT 1 FROM study_log WHERE client_key = ?").get(input.clientKey)) return;
     const unitExists = input.unitId && d.prepare("SELECT 1 FROM units WHERE id = ?").get(input.unitId);
-    d.prepare("INSERT INTO study_log (day, unit_id, mode, items, correct, xp, seconds, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+    d.prepare("INSERT INTO study_log (day, unit_id, mode, items, correct, xp, seconds, client_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
       input.day,
       unitExists ? input.unitId : null,
       input.mode,
@@ -456,6 +472,7 @@ export function logStudy(input: {
       input.correct,
       input.xp,
       input.seconds,
+      input.clientKey ?? "",
       now(),
     );
     // Missing a quiz question about a card brings that card back into today's review.

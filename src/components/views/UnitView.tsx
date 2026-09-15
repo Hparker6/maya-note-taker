@@ -40,17 +40,24 @@ export function UnitView({
   const { openUpload, openShare } = useShell();
   const actions = useTreeActions();
   const [tab, setTab] = useState<UnitTab>(initialTab);
+  // Tabs stay mounted once opened, so coming back shows the work as it was (unsaved edits, scroll
+  // position, undo history) instead of the copy the page loaded with.
+  const [visited, setVisited] = useState<UnitTab[]>([initialTab]);
   const { unit, section, klass } = ctx;
 
   // A link to a specific note (search, upload) always opens the notes tab.
   const [seenNote, setSeenNote] = useState(initialNoteId);
   if (seenNote !== initialNoteId) {
     setSeenNote(initialNoteId);
-    if (initialNoteId) setTab("notes");
+    if (initialNoteId) {
+      setTab("notes");
+      if (!visited.includes("notes")) setVisited([...visited, "notes"]);
+    }
   }
 
   const switchTab = (next: UnitTab) => {
     setTab(next);
+    if (!visited.includes(next)) setVisited([...visited, next]);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", next);
     url.searchParams.delete("note");
@@ -134,15 +141,18 @@ export function UnitView({
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col bg-card">
-        {tab === "practice" ? (
+      {visited.includes("practice") && (
+        <div className={clsx("min-h-0 flex-1 flex-col bg-card", tab === "practice" ? "flex" : "hidden")}>
           <PracticePanel
             unitId={unit.id}
             unitName={unit.name}
             initial={practice}
             hasMaterial={documents.length > 0 || notes.some((n) => n.content.replace(/<[^>]+>/g, "").trim())}
           />
-        ) : tab === "sheet" ? (
+        </div>
+      )}
+      {visited.includes("sheet") && (
+        <div className={clsx("min-h-0 flex-1 flex-col bg-card", tab === "sheet" ? "flex" : "hidden")}>
           <SheetPanel
             scope="unit"
             scopeId={unit.id}
@@ -153,7 +163,10 @@ export function UnitView({
             emptyBody="AI reads every lecture here — including your edits and highlights — plus your own notes, then writes one dense, organized sheet sized to print on one or two pages."
             sourceSummary={sources || undefined}
           />
-        ) : (
+        </div>
+      )}
+      {visited.includes("notes") && (
+        <div className={clsx("min-h-0 flex-1 flex-col bg-card", tab === "notes" ? "flex" : "hidden")}>
           <NotesWorkspace
             unitId={unit.id}
             notes={notes}
@@ -162,8 +175,8 @@ export function UnitView({
             initialNoteId={initialNoteId}
             initialPanel={initialPanel}
           />
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -29,6 +29,7 @@ export const POST = handler(async (request: Request) => {
       questionResults: results
         .filter((r): r is { id: number; correct: boolean } => Boolean(r) && Number.isInteger(r.id) && typeof r.correct === "boolean")
         .slice(0, 500),
+      clientKey: typeof body.key === "string" && /^[\w-]{8,64}$/.test(body.key) ? body.key : undefined,
     }),
   );
 });

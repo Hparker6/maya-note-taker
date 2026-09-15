@@ -60,7 +60,6 @@ export function PracticePanel({
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(PAGE);
   const abort = useRef<AbortController | null>(null);
-  const seenVersion = useRef(studyVersion);
 
   const refresh = async () => {
     try {
@@ -68,10 +67,8 @@ export function PracticePanel({
     } catch {}
   };
 
-  // After a study session, reload progress.
+  // Load the current deck on mount (the page may come from the back/forward cache) and after each study session.
   useEffect(() => {
-    if (seenVersion.current === studyVersion) return;
-    seenVersion.current = studyVersion;
     void api<UnitPracticeData>(`/api/units/${unitId}/practice`)
       .then(setData)
       .catch(() => {});
@@ -127,20 +124,39 @@ export function PracticePanel({
   const deleteCard = async (card: CardRow) => {
     const ok = await confirm({ title: "Delete this card?", message: card.front, confirmLabel: "Delete", danger: true });
     if (!ok) return;
-    await api(`/api/cards/${card.id}`, { method: "DELETE" }).catch(() => toast("Couldn't delete", "error"));
+    try {
+      await api(`/api/cards/${card.id}`, { method: "DELETE" });
+    } catch (err) {
+      toast(err instanceof Error ? `Couldn't delete: ${err.message}` : "Couldn't delete", "error");
+    }
     void refresh();
   };
 
   const resetCard = async (card: CardRow) => {
-    await api(`/api/cards/${card.id}`, { method: "PATCH", json: { reset: true } }).catch(() => toast("Couldn't reset", "error"));
-    toast("Progress reset — it'll show up as a new card");
+    const ok = await confirm({
+      title: "Reset this card's progress?",
+      message: "Its review history is cleared and it comes back as a new card.",
+      confirmLabel: "Reset progress",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api(`/api/cards/${card.id}`, { method: "PATCH", json: { reset: true } });
+      toast("Progress reset — it'll show up as a new card");
+    } catch (err) {
+      toast(err instanceof Error ? `Couldn't reset: ${err.message}` : "Couldn't reset", "error");
+    }
     void refresh();
   };
 
   const deleteQuestion = async (id: number) => {
     const ok = await confirm({ title: "Delete this question?", confirmLabel: "Delete", danger: true });
     if (!ok) return;
-    await api(`/api/questions/${id}`, { method: "DELETE" }).catch(() => toast("Couldn't delete", "error"));
+    try {
+      await api(`/api/questions/${id}`, { method: "DELETE" });
+    } catch (err) {
+      toast(err instanceof Error ? `Couldn't delete: ${err.message}` : "Couldn't delete", "error");
+    }
     void refresh();
   };
 

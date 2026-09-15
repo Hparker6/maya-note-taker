@@ -5,6 +5,7 @@ import { BookMarked, Menu as MenuIcon, UploadCloud } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { APP_NAME } from "@/lib/brand";
+import { resumePractice } from "@/lib/practice-sync";
 import type { AiProvider, ClassNode, ClassRow } from "@/lib/types";
 import { useMediaQuery } from "@/lib/useMediaQuery";
 import { StudySession, type StudyRequest } from "../practice/StudySession";
@@ -79,6 +80,9 @@ export function AppShell({
     () => ({ tree, aiReady, aiProvider, openAiSettings, openCanvas, openShare, canvas, practiceDue, startStudy, studyVersion, openUpload, openSearch, openClassDialog, setActiveUnit }),
     [tree, aiReady, aiProvider, openAiSettings, openCanvas, openShare, canvas, practiceDue, startStudy, studyVersion, openUpload, openSearch, openClassDialog],
   );
+
+  // Send flashcard reviews and quiz results left unsent by an earlier visit (e.g. closed while offline).
+  useEffect(() => resumePractice(), []);
 
   // Tell the server the browser's time zone so "due today" and streaks follow the student's day.
   useEffect(() => {
