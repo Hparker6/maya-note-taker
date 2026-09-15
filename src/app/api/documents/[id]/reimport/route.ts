@@ -12,6 +12,7 @@ export const POST = handler(async (_request: Request, { params }: Ctx) => {
   const internals = getDocumentInternals(id);
   if (!internals) throw notFound("PDF not found.");
   const extracted = await extractPdf(new Uint8Array(await readFile(internals.stored_name)));
-  importExtracted(id, extracted);
+  // A PDF without a text layer has nothing to rebuild from: keep the current notes (e.g. an AI conversion).
+  if (!extracted.scanned) importExtracted(id, extracted);
   return Response.json({ note: getImportNote(id), scanned: extracted.scanned });
 });

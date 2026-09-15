@@ -2,6 +2,7 @@ import "server-only";
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { backupDatabase, scheduleBackups } from "./backup";
 
 // Runtime data lives outside the build; tell Turbopack not to trace it.
 export const DATA_DIR = path.resolve(
@@ -227,6 +228,14 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_shares_scope ON shares(scope, scope_id);
   `,
+  // 7: data safety — a version stamp for handwriting (so an out-of-date window can't overwrite it),
+  // and ids that make retried flashcard reviews and study-session logs count once.
+  `
+  ALTER TABLE notes ADD COLUMN ink_updated_at TEXT NOT NULL DEFAULT '';
+  ALTER TABLE cards ADD COLUMN last_review_key TEXT NOT NULL DEFAULT '';
+  ALTER TABLE study_log ADD COLUMN client_key TEXT NOT NULL DEFAULT '';
+  CREATE INDEX IF NOT EXISTS idx_study_log_client_key ON study_log(client_key);
+  `,
 ];
 
 declare global {
@@ -249,6 +258,8 @@ export function db(): Database.Database {
   if (!migrated) {
     const conn = globalThis.__mayaDb;
     const version = conn.pragma("user_version", { simple: true }) as number;
+    // Keep a copy from before an update changes the database, in case anything goes wrong.
+    if (version > 0 && version < MIGRATIONS.length) backupDatabase(conn, DATA_DIR, "before-update");
     for (let i = version; i < MIGRATIONS.length; i++) {
       conn.transaction(() => {
         conn.exec(MIGRATIONS[i]);
@@ -256,6 +267,7 @@ export function db(): Database.Database {
       })();
     }
     migrated = true;
+    scheduleBackups(conn, DATA_DIR);
   }
   return globalThis.__mayaDb;
 }

@@ -421,8 +421,10 @@ export function updateNoteInk(id: number, patch: { ink?: string; lineSpacing?: s
   if (!note) return undefined;
   const ink = patch.ink ?? note.ink;
   const lineSpacing = patch.lineSpacing ?? note.line_spacing;
-  db().prepare("UPDATE notes SET ink = ?, line_spacing = ? WHERE id = ?").run(ink, lineSpacing, id);
-  return { ...note, ink, line_spacing: lineSpacing };
+  // Its own version stamp, so saving ink never makes a text save look out of date (and vice versa).
+  const inkUpdatedAt = now();
+  db().prepare("UPDATE notes SET ink = ?, line_spacing = ?, ink_updated_at = ? WHERE id = ?").run(ink, lineSpacing, inkUpdatedAt, id);
+  return { ...note, ink, line_spacing: lineSpacing, ink_updated_at: inkUpdatedAt };
 }
 
 export function deleteNote(id: number) {

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, countWords, estimatePages } from "@/lib/client";
+import { api, ApiError, countWords, estimatePages } from "@/lib/client";
 import { consumeJobStream } from "@/lib/job-client";
 import { markdownToHtml } from "@/lib/markdown";
 import type { JobStatus, SheetRow, SheetScope, SheetState } from "@/lib/types";
@@ -76,16 +76,37 @@ export function SheetPanel({
   // Adopt fresh server data (e.g. after router.refresh()) unless the user is mid-edit.
   const serverKey = `${initial.sheet?.updated_at ?? ""}|${initial.stale}`;
   const [seenServerKey, setSeenServerKey] = useState(serverKey);
+  const [versionKnown, setVersionKnown] = useState(true);
   if (serverKey !== seenServerKey && !editing && !gen) {
     setSeenServerKey(serverKey);
     setSheet(initial.sheet);
     setStale(initial.stale);
+    setVersionKnown(true);
   }
 
-  const saver = useAutosave(async (html: string) => {
-    const res = await api<{ updated_at: string }>(`/api/sheets/${scope}/${scopeId}`, { method: "PUT", json: { content: html } });
-    setSheet((s) => ({ content: html, generated_at: s?.generated_at ?? res.updated_at, updated_at: res.updated_at }));
+  // The version an edit session started from; saves based on an older version are refused by the server.
+  const savedVersion = useRef<string | null>(null);
+  const saver = useAutosave(async ({ html, base }: { html: string; base: string | null }) => {
+    try {
+      const res = await api<{ updated_at: string }>(`/api/sheets/${scope}/${scopeId}`, {
+        method: "PUT",
+        json: { content: html, base_updated_at: savedVersion.current ?? base },
+      });
+      savedVersion.current = res.updated_at;
+      setSheet((s) => ({ content: html, generated_at: s?.generated_at ?? res.updated_at, updated_at: res.updated_at }));
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.status !== 409 || !err.data.sheet) throw err;
+      const latest = err.data.sheet as SheetRow;
+      setSheet(latest);
+      setEditing(false);
+      toast("This sheet was changed in another window, so this edit wasn't saved over it. Showing the latest version — make the edit again.", "error");
+    }
   });
+
+  const startEditing = () => {
+    savedVersion.current = null;
+    setEditing(true);
+  };
 
   const consume = useCallback(
     async (start: boolean) => {
@@ -108,7 +129,9 @@ export function SheetPanel({
             setGen((g) => (g ? { ...g, status: "writing", html } : g));
           },
           done: (event) => {
+            // Browser time is a placeholder until router.refresh() brings the saved sheet's real version.
             const ts = new Date().toISOString();
+            setVersionKnown(false);
             setSheet({ content: event.html, generated_at: ts, updated_at: ts });
             setStale(false);
             setGen(null);
@@ -218,8 +241,9 @@ export function SheetPanel({
 
   const startBlank = () => {
     const ts = new Date().toISOString();
+    setVersionKnown(false);
     setSheet({ content: "", generated_at: ts, updated_at: ts });
-    setEditing(true);
+    startEditing();
   };
 
   const words = sheet ? countWords(sheet.content) : 0;
@@ -296,7 +320,7 @@ export function SheetPanel({
         <div className={clsx("flex items-center gap-3 border-b border-line py-2.5", pad)}>
           <FilePenLine className="size-4 text-ink-3" />
           <span className="text-sm font-medium">Editing sheet</span>
-          <SaveIndicator status={saver.status} onRetry={() => void saver.flush()} />
+          <SaveIndicator status={saver.status} error={saver.error?.message} blocked={saver.error?.blocked} onRetry={() => void saver.flush()} />
           <Button variant="primary" size="sm" className="ml-auto" onClick={finishEditing}>
             <Check /> Done
           </Button>
@@ -306,7 +330,7 @@ export function SheetPanel({
           variant="sheet"
           autofocus
           placeholder="Write your study sheet…"
-          onUpdate={(html) => saver.schedule(html)}
+          onUpdate={(html) => saver.schedule({ html, base: versionKnown ? sheet.updated_at : null })}
           className="min-h-0 flex-1"
           toolbarClassName={clsx("sticky top-0 z-10", compact ? "px-3" : "px-4 sm:px-8")}
           contentClassName={clsx("overflow-y-auto py-6", pad)}
@@ -339,7 +363,7 @@ export function SheetPanel({
               <RefreshCw /> {stale ? "Update" : "Regenerate"}
             </Button>
           )}
-          <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+          <Button size="sm" variant="secondary" onClick={startEditing}>
             <PenLine /> Edit
           </Button>
           <a href={`/print/${scope}/${scopeId}`} target="_blank" rel="noreferrer" className={buttonClass("secondary", "sm")}>
@@ -359,7 +383,7 @@ export function SheetPanel({
       <div className={clsx("flex-1 overflow-y-auto py-6", pad)}>
         <article
           className="rich rich-sheet mx-auto max-w-3xl"
-          onDoubleClick={() => setEditing(true)}
+          onDoubleClick={startEditing}
           dangerouslySetInnerHTML={{ __html: sheet.content || "<p><em>This sheet is empty.</em></p>" }}
         />
       </div>

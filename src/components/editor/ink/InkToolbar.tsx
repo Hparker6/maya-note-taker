@@ -57,6 +57,7 @@ export function InkToolbar({
   onFingerDraws,
   showFingerToggle,
   onDone,
+  saveIndicator,
 }: {
   title: string;
   prefs: InkPrefs;
@@ -73,6 +74,7 @@ export function InkToolbar({
   onFingerDraws: (value: boolean) => void;
   showFingerToggle: boolean;
   onDone: () => void;
+  saveIndicator?: React.ReactNode;
 }) {
   const highlighter = prefs.tool === "highlighter";
   const colors = highlighter ? INK_HIGHLIGHTER_COLORS : INK_PEN_COLORS;
@@ -180,6 +182,7 @@ export function InkToolbar({
             <Hand /> <span className="hidden text-xs sm:inline">{fingerDraws ? "Finger draws" : "Finger scrolls"}</span>
           </Tool>
         )}
+        {saveIndicator && <div className="ml-2 flex min-h-10 items-center">{saveIndicator}</div>}
       </div>
     </div>
   );

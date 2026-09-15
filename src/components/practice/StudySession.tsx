@@ -3,8 +3,9 @@
 import clsx from "clsx";
 import { Check, Flame, Keyboard, Layers, ListChecks, PartyPopper, RotateCcw, Timer, Trophy, X, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/client";
+import { api, randomKey } from "@/lib/client";
 import { checkTypedAnswer, intervalLabel, schedule, XP, type Rating } from "@/lib/practice-shared";
+import { sendPractice, waitForPractice } from "@/lib/practice-sync";
 import type { CardRow, SessionItem, StreakInfo, StudyMode, StudySession as Session } from "@/lib/types";
 import { Spinner } from "../ui/Button";
 import { useFeedback } from "../ui/feedback";
@@ -52,6 +53,8 @@ export function StudySession({
   const missedCards = useRef(new Set<number>());
   const questionResults = useRef(new Map<number, boolean>());
   const logged = useRef(false);
+  // The item already answered, so a double tap or a held key can't record it twice.
+  const answered = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,35 +71,44 @@ export function StudySession({
     };
   }, [request]);
 
+  /**
+   * Records the session once. If the connection drops, the result is queued and retried (with the
+   * same key, so it still counts once); the streak just isn't shown this time.
+   */
   const log = useCallback(
-    async (extraXp: number) => {
+    async (stats: { items: number; correct: number; xp: number }) => {
       if (logged.current || !session) return null;
       logged.current = true;
+      const body = {
+        key: randomKey(),
+        mode: session.mode,
+        unit_id: session.unitId,
+        items: stats.items,
+        correct: stats.correct,
+        xp: stats.xp,
+        seconds: Math.round((Date.now() - startedAt.current) / 1000),
+        missed_card_ids: [...missedCards.current],
+        question_results: [...questionResults.current].map(([id, correct]) => ({ id, correct })),
+      };
+      // Reviews answered just before the end go first, so the streak reflects them.
+      await waitForPractice(4000);
       try {
-        return await api<StreakInfo>("/api/practice/log", {
-          method: "POST",
-          json: {
-            mode: session.mode,
-            unit_id: session.unitId,
-            items: doneKeys.size,
-            correct: tally.correct,
-            xp: xp + extraXp,
-            seconds: Math.round((Date.now() - startedAt.current) / 1000),
-            missed_card_ids: [...missedCards.current],
-            question_results: [...questionResults.current].map(([id, correct]) => ({ id, correct })),
-          },
-        });
+        return await api<StreakInfo>("/api/practice/log", { method: "POST", json: body });
       } catch {
+        sendPractice("/api/practice/log", body, body.key);
         return null;
       }
     },
-    [session, doneKeys, tally, xp],
+    [session],
   );
 
   const close = useCallback(async () => {
-    if (!finished && xp > 0) await log(0);
+    // Anything answered counts, even a quiz with no right answers yet: misses bring cards back for review.
+    const progress = xp > 0 || doneKeys.size > 0 || tally.answered > 0 || missedCards.current.size > 0 || questionResults.current.size > 0;
+    if (!finished && progress) await log({ items: doneKeys.size, correct: tally.correct, xp });
+    if (!(await waitForPractice(2500))) toast("Some answers are still saving — they'll finish when the connection is back.", "info");
     onClose();
-  }, [finished, xp, log, onClose]);
+  }, [finished, xp, doneKeys, tally, log, onClose, toast]);
 
   // Esc leaves the session (progress is kept).
   useEffect(() => {
@@ -115,24 +127,8 @@ export function StudySession({
     const perfect = session.mode === "quiz" && nextTally.answered >= 5 && nextTally.correct === nextTally.answered;
     const bonus = XP.finish + (perfect ? XP.perfect : 0);
     const seconds = Math.round((Date.now() - startedAt.current) / 1000);
-    // log() reads state from this render, so pass the final numbers explicitly.
-    logged.current = true;
-    let streak: StreakInfo | null = null;
-    try {
-      streak = await api<StreakInfo>("/api/practice/log", {
-        method: "POST",
-        json: {
-          mode: session.mode,
-          unit_id: session.unitId,
-          items: nextDone.size,
-          correct: nextTally.correct,
-          xp: nextXp + bonus,
-          seconds,
-          missed_card_ids: [...missedCards.current],
-          question_results: [...questionResults.current].map(([id, correct]) => ({ id, correct })),
-        },
-      });
-    } catch {}
+    // State from this render is one step behind, so pass the final numbers explicitly.
+    const streak = await log({ items: nextDone.size, correct: nextTally.correct, xp: nextXp + bonus });
     setFinished({ streak, seconds, bonus });
   };
 
@@ -155,9 +151,10 @@ export function StudySession({
   const current = queue[pos];
 
   const onRate = (rating: Rating) => {
-    if (!current || current.type !== "card") return;
+    if (!current || current.type !== "card" || answered.current === current.uid) return;
+    answered.current = current.uid;
     const card = current.card;
-    api<CardRow>(`/api/cards/${card.id}/review`, { method: "POST", json: { rating } }).catch(() => toast("Couldn't save that review", "error"));
+    sendPractice(`/api/cards/${card.id}/review`, { rating });
     const nextDone = new Set(doneKeys);
     let nextQueue = queue;
     if (rating === "again") nextQueue = requeue(current, pos + 4, { card: { ...card, ...schedule(card, "again"), due_day: card.due_day || "today" } });
@@ -166,7 +163,8 @@ export function StudySession({
   };
 
   const onCram = (knewIt: boolean) => {
-    if (!current || current.type !== "card") return;
+    if (!current || current.type !== "card" || answered.current === current.uid) return;
+    answered.current = current.uid;
     const nextDone = new Set(doneKeys);
     let nextQueue = queue;
     if (!knewIt && current.attempt < 3) nextQueue = requeue(current, queue.length);
@@ -175,7 +173,8 @@ export function StudySession({
   };
 
   const onAnswer = (correct: boolean) => {
-    if (!current || current.type === "card") return;
+    if (!current || current.type === "card" || answered.current === current.uid) return;
+    answered.current = current.uid;
     const first = current.attempt === 0;
     const nextTally = first ? { answered: tally.answered + 1, correct: tally.correct + (correct ? 1 : 0) } : tally;
     if (first && current.type === "mcq" && current.questionId) questionResults.current.set(current.questionId, correct);

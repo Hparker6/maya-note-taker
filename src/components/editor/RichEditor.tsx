@@ -81,6 +81,8 @@ export interface InkBinding {
   penMode: boolean;
   onPenModeChange: (on: boolean) => void;
   title: string;
+  /** Shown in the pen toolbar, where the note's own save status is out of sight. */
+  saveIndicator?: ReactNode;
 }
 
 const MIN_ZOOM = 0.5;
@@ -336,6 +338,7 @@ export function RichEditor({
           onFingerDraws={setFingerDraws}
           showFingerToggle={coarse}
           onDone={() => ink.onPenModeChange(false)}
+          saveIndicator={ink.saveIndicator}
         />
       ) : (
         <EditorToolbar

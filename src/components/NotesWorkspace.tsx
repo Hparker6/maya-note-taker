@@ -29,9 +29,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/client";
 import { consumeJobStream } from "@/lib/job-client";
 import { markdownToHtml } from "@/lib/markdown";
+import { editNoteInk, editNoteText, flushNote, flushNotes, forgetNote, onNoteSyncEvent, seedNotes, useNoteSyncState } from "@/lib/note-sync";
 import type { JobStatus, NoteRow, WorkspaceDocument } from "@/lib/types";
-import { useAutosave } from "@/lib/useAutosave";
 import { useMediaQuery } from "@/lib/useMediaQuery";
+import { useHydrated } from "@/lib/useStorage";
 import { RichEditor, WordCount } from "./editor/RichEditor";
 import { MoveDocumentDialog } from "./MoveDocumentDialog";
 import { RelativeTime } from "./RelativeTime";
@@ -89,7 +90,7 @@ export function NotesWorkspace({
   const isWide = useMediaQuery("(min-width: 1680px)");
 
   const [notes, setNotesState] = useState(serverNotes);
-  // Mirror of `notes` so autosave always sees the latest title + content together.
+  // Mirror of `notes` for event handlers that run between renders.
   const notesRef = useRef(serverNotes);
   const setNotes = useCallback((update: (list: NoteRow[]) => NoteRow[]) => {
     notesRef.current = update(notesRef.current);
@@ -100,7 +101,11 @@ export function NotesWorkspace({
   const [mobileEditor, setMobileEditor] = useState(Boolean(initialNoteId));
   const [panel, setPanel] = useState<SidePanel>(initialPanel);
   const [listOpen, setListOpen] = useState(false);
-  const [editorVersion, setEditorVersion] = useState(0);
+  // Bumping a note's version remounts its editor with content that changed underneath it.
+  const [editorVersions, setEditorVersions] = useState<Record<number, number>>({});
+  const bumpEditors = useCallback((ids: number[]) => {
+    if (ids.length) setEditorVersions((v) => Object.fromEntries([...Object.entries(v), ...ids.map((id) => [id, (v[id] ?? 0) + 1])]));
+  }, []);
   const [creating, setCreating] = useState(false);
   const [moving, setMoving] = useState<WorkspaceDocument | null>(null);
   const [transcribing, setTranscribing] = useState<{ docId: number; status: JobStatus; html: string } | null>(null);
@@ -109,38 +114,45 @@ export function NotesWorkspace({
   const editorRef = useRef<Editor | null>(null);
   const transcribeAbort = useRef<AbortController | null>(null);
 
-  const saver = useAutosave(async (note: { id: number; title: string; content: string }) => {
-    const res = await api<{ updated_at: string }>(`/api/notes/${note.id}`, {
-      method: "PATCH",
-      json: { title: note.title, content: note.content },
-    });
-    setNotes((list) => list.map((n) => (n.id === note.id ? { ...n, updated_at: res.updated_at } : n)));
-  });
-
-  // Handwriting saves separately and doesn't count as a text edit.
-  const inkSaver = useAutosave(async (note: { id: number; ink: string; line_spacing: string }) => {
-    await api(`/api/notes/${note.id}`, { method: "PATCH", json: { ink: note.ink, line_spacing: note.line_spacing } });
-  }, 900);
-
-  // Merge fresh server data (new imports, AI conversions) without clobbering unsaved typing.
-  const serverSig = serverNotes.map((n) => `${n.id}@${n.updated_at}`).join(",");
-  const [seenSig, setSeenSig] = useState(serverSig);
-  if (serverSig !== seenSig) {
+  // Server data goes through the save store, which keeps whatever is newest: unsaved edits (even from a
+  // window that was closed), a version this tab already saved (when the page came from cache), or the server's.
+  // Runs after hydration, so the first render matches the server's HTML.
+  const hydrated = useHydrated();
+  const serverSig = serverNotes.map((n) => `${n.id}@${n.updated_at}@${n.ink_updated_at}`).join(",");
+  const [seenSig, setSeenSig] = useState<string | null>(null);
+  if (hydrated && serverSig !== seenSig) {
     setSeenSig(serverSig);
-    const local = new Map(notes.map((n) => [n.id, n]));
-    const busy = saver.status === "pending" || saver.status === "saving";
-    const merged = serverNotes.map((s) => {
-      const l = local.get(s.id);
-      return !l || (s.updated_at > l.updated_at && !(busy && s.id === selectedId)) ? s : l;
-    });
-    const openNote = local.get(selectedId ?? -1);
-    const refreshedOpenNote = merged.find((n) => n.id === selectedId);
+    const merged = seedNotes(serverNotes);
+    const before = new Map(notes.map((n) => [n.id, n]));
     setNotesState(merged);
-    if (openNote && refreshedOpenNote && refreshedOpenNote.content !== openNote.content) setEditorVersion((v) => v + 1);
+    bumpEditors(merged.filter((n) => before.has(n.id) && (before.get(n.id)!.content !== n.content || before.get(n.id)!.ink !== n.ink)).map((n) => n.id));
   }
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
+
+  // A save that ran into changes made elsewhere: show the newest version, and any copy made of the edits here.
+  useEffect(
+    () =>
+      onNoteSyncEvent((event) => {
+        if (event.type === "replaced") {
+          const current = notesRef.current.find((n) => n.id === event.note.id);
+          if (!current) return;
+          setNotes((list) => list.map((n) => (n.id === event.note.id ? event.note : n)));
+          if (current.content !== event.note.content || current.ink !== event.note.ink) bumpEditors([event.note.id]);
+        } else if (event.note.unit_id === unitId) {
+          setNotes((list) => [event.note, ...list.filter((n) => n.id !== event.note.id && (event.reason !== "deleted" || n.id !== event.from))]);
+          toast(
+            event.reason === "conflict"
+              ? `This note was changed in another window or device. Nothing was lost: your version is saved as "${event.note.title}".`
+              : `This note was deleted somewhere else. Your unsaved changes are kept as "${event.note.title}".`,
+            "info",
+          );
+          router.refresh();
+        }
+      }),
+    [bumpEditors, router, setNotes, toast, unitId],
+  );
 
   // Follow navigation that points at a specific note or panel (e.g. right after an upload).
   const [seenInitial, setSeenInitial] = useState({ note: initialNoteId, panel: initialPanel });
@@ -160,6 +172,7 @@ export function NotesWorkspace({
   const own = notes.filter((n) => n.kind === "note");
   const ordered = [...imports, ...own];
   const selected = notes.find((n) => n.id === selectedId) ?? (isDesktop ? ordered[0] : undefined) ?? null;
+  const sync = useNoteSyncState(selected?.id);
   const selectedDoc = selected?.document_id ? docsById.get(selected.document_id) : undefined;
   const panelDoc = panel ? selectedDoc : undefined;
   const showList = !isDesktop || !panelDoc || isWide || listOpen;
@@ -172,32 +185,28 @@ export function NotesWorkspace({
     return () => clearInterval(timer);
   }, [anyRunning, router]);
 
-  const { schedule } = saver;
   const patchLocal = useCallback(
-    (id: number, patch: Partial<NoteRow>) => {
-      const current = notesRef.current.find((n) => n.id === id);
-      if (!current) return;
-      const merged = { ...current, ...patch };
-      setNotes((list) => list.map((n) => (n.id === id ? merged : n)));
-      schedule({ id, title: merged.title, content: merged.content });
+    (id: number, patch: Partial<Pick<NoteRow, "title" | "content">>) => {
+      if (!notesRef.current.some((n) => n.id === id)) return;
+      setNotes((list) => list.map((n) => (n.id === id ? { ...n, ...patch } : n)));
+      editNoteText(id, patch);
     },
-    [schedule, setNotes],
+    [setNotes],
   );
 
-  const { schedule: scheduleInk } = inkSaver;
+  // Handwriting saves separately and doesn't count as a text edit.
   const patchInk = useCallback(
     (id: number, patch: Partial<Pick<NoteRow, "ink" | "line_spacing">>) => {
-      const current = notesRef.current.find((n) => n.id === id);
-      if (!current) return;
-      const merged = { ...current, ...patch };
-      setNotes((list) => list.map((n) => (n.id === id ? merged : n)));
-      scheduleInk({ id, ink: merged.ink ?? "", line_spacing: merged.line_spacing ?? "" });
+      if (!notesRef.current.some((n) => n.id === id)) return;
+      setNotes((list) => list.map((n) => (n.id === id ? { ...n, ...patch } : n)));
+      editNoteInk(id, patch);
     },
-    [scheduleInk, setNotes],
+    [setNotes],
   );
 
-  const select = async (id: number) => {
-    await Promise.all([saver.flush(), inkSaver.flush()]);
+  const select = (id: number) => {
+    // Unsaved edits to the previous note keep saving (and retrying) on their own.
+    void flushNotes();
     setPenMode(false);
     setSelectedId(id);
     setMobileEditor(true);
@@ -207,8 +216,8 @@ export function NotesWorkspace({
   const create = async () => {
     setCreating(true);
     try {
-      await saver.flush();
-      const note = await api<NoteRow>("/api/notes", { json: { unit_id: unitId, title: "", content: "" } });
+      void flushNotes();
+      const [note] = seedNotes([await api<NoteRow>("/api/notes", { json: { unit_id: unitId, title: "", content: "" } })]);
       setNotes((list) => [note, ...list]);
       setSelectedId(note.id);
       setPanel(null);
@@ -233,10 +242,19 @@ export function NotesWorkspace({
       danger: true,
     });
     if (!ok) return;
-    await saver.flush();
-    await api(`/api/notes/${note.id}`, { method: "DELETE" });
+    // Stop saving it first, so a late save can't bring the note back as a "recovered" copy.
+    await flushNote(note.id);
+    forgetNote(note.id);
+    try {
+      await api(`/api/notes/${note.id}`, { method: "DELETE" });
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't delete — check the connection and try again", "error");
+      router.refresh();
+      return;
+    }
     setNotes((list) => list.filter((n) => n.id !== note.id));
     setSelectedId(null);
+    setPenMode(false);
     setPanel(null);
     setMobileEditor(false);
     toast(isImport ? "Lecture deleted" : "Note deleted");
@@ -286,11 +304,16 @@ export function NotesWorkspace({
             const html = DOMPurify.sanitize(markdownToHtml(markdown));
             setTranscribing((t) => ({ docId: doc.id, status: "writing", html: html || (t?.html ?? "") }));
           },
-          done: (event) => {
+          done: async (event) => {
             const note = notesRef.current.find((n) => n.kind === "import" && n.document_id === doc.id);
-            if (note) setNotes((list) => list.map((n) => (n.id === note.id ? { ...n, content: event.html, updated_at: new Date().toISOString() } : n)));
+            if (note) {
+              // Take the saved note (with its new version), so edits made next aren't mistaken for out-of-date ones.
+              const fresh = await api<NoteRow>(`/api/notes/${note.id}`).catch(() => null);
+              const [shown] = seedNotes([fresh ?? { ...note, content: event.html }]);
+              setNotes((list) => list.map((n) => (n.id === note.id ? shown : n)));
+              bumpEditors([note.id]);
+            }
             setTranscribing(null);
-            setEditorVersion((v) => v + 1);
             toast(event.warning ?? "Converted — the notes are ready to edit", event.warning ? "info" : "success");
             router.refresh();
           },
@@ -302,7 +325,7 @@ export function NotesWorkspace({
         controller.signal,
       );
     },
-    [router, setNotes, toast],
+    [bumpEditors, router, setNotes, toast],
   );
 
   // Reattach if a conversion for the open lecture is already running on the server.
@@ -315,39 +338,50 @@ export function NotesWorkspace({
 
   useEffect(() => () => transcribeAbort.current?.abort(), []);
 
+  /** Rewriting a lecture's text needs its latest edits saved first, so the replacement is what she agreed to. */
+  const readyToReplace = async (note: NoteRow) => {
+    if (await flushNote(note.id)) return true;
+    toast("Your latest edits to this lecture haven't saved yet. Try again once it says Saved.", "error");
+    return false;
+  };
+
+  const inkWarning = (note: NoteRow) => (note.ink ? " Your handwriting stays on the page, but may no longer line up with the new text." : "");
+
   const convertWithAi = async (doc: WorkspaceDocument, note: NoteRow) => {
-    if (hasText(note.content)) {
+    if (hasText(note.content) || note.ink) {
       const ok = await confirm({
         title: "Convert with AI?",
-        message:
-          "AI reads the original PDF — including scanned pages, tables and diagrams — and rewrites these notes from it. Any edits you've made to this lecture's text will be replaced.",
+        message: `AI reads the original PDF — including scanned pages, tables and diagrams — and rewrites these notes from it. Any edits you've made to this lecture's text will be replaced.${inkWarning(note)}`,
         confirmLabel: "Convert",
       });
       if (!ok) return;
     }
-    await saver.flush();
+    if (!(await readyToReplace(note))) return;
     setTranscribing({ docId: doc.id, status: "queued", html: "" });
     void attachTranscription(doc, true);
   };
 
   const reimport = async (doc: WorkspaceDocument, note: NoteRow) => {
-    if (hasText(note.content)) {
+    if (hasText(note.content) || note.ink) {
       const ok = await confirm({
         title: "Re-import from the PDF?",
-        message: "The text is rebuilt from the original PDF with fresh formatting (headings, bold terms, indented lists). Any edits or highlights you've made to this lecture's text will be replaced.",
+        message: `The text is rebuilt from the original PDF with fresh formatting (headings, bold terms, indented lists). Any edits or highlights you've made to this lecture's text will be replaced.${inkWarning(note)}`,
         confirmLabel: "Re-import",
       });
       if (!ok) return;
     }
-    await saver.flush();
+    if (!(await readyToReplace(note))) return;
     try {
       const result = await api<{ note: NoteRow | null; scanned: boolean }>(`/api/documents/${doc.id}/reimport`, { method: "POST" });
-      if (result.note) {
-        const fresh = result.note;
-        setNotes((list) => list.map((n) => (n.id === fresh.id ? { ...n, content: fresh.content, updated_at: fresh.updated_at } : n)));
-        setEditorVersion((v) => v + 1);
+      if (result.note && !result.scanned) {
+        const [fresh] = seedNotes([result.note]);
+        setNotes((list) => list.map((n) => (n.id === fresh.id ? fresh : n)));
+        bumpEditors([fresh.id]);
       }
-      toast(result.scanned ? "No selectable text in this PDF — try Convert with AI" : "Re-imported with fresh formatting", result.scanned ? "info" : "success");
+      toast(
+        result.scanned ? "This PDF has no selectable text, so nothing was changed. Try Convert with AI instead." : "Re-imported with fresh formatting",
+        result.scanned ? "info" : "success",
+      );
       router.refresh();
     } catch (err) {
       toast(err instanceof Error ? err.message : "Couldn't re-import", "error");
@@ -515,7 +549,7 @@ export function NotesWorkspace({
         </div>
       ) : (
         <RichEditor
-          key={`${selected.id}:${editorVersion}`}
+          key={`${selected.id}:${editorVersions[selected.id] ?? 0}`}
           content={selected.content}
           onUpdate={(html) => patchLocal(selected.id, { content: html })}
           onReady={(editor) => (editorRef.current = editor)}
@@ -528,9 +562,10 @@ export function NotesWorkspace({
             penMode,
             onPenModeChange: (on) => {
               setPenMode(on);
-              if (!on) void inkSaver.flush();
+              if (!on) void flushNotes();
             },
             title: selected.title,
+            saveIndicator: <SaveIndicator status={sync.status} error={sync.error} blocked={sync.blocked} onRetry={() => void flushNotes(true)} />,
           }}
           placeholder={isImport ? "This lecture has no text yet." : undefined}
           className="min-h-0 flex-1"
@@ -595,7 +630,7 @@ export function NotesWorkspace({
               />
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
                 <RelativeTime iso={selected.updated_at} prefix={isImport ? "Updated " : "Edited "} />
-                <SaveIndicator status={saver.status} onRetry={() => void saver.flush()} />
+                <SaveIndicator status={sync.status} error={sync.error} blocked={sync.blocked} onRetry={() => void flushNotes(true)} />
               </div>
               {scanned && selectedDoc && (
                 <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[color-mix(in_oklab,var(--tc-orange)_35%,transparent)] bg-[color-mix(in_oklab,var(--tc-orange)_8%,transparent)] px-4 py-3 text-sm">
