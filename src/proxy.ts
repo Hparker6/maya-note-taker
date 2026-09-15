@@ -17,5 +17,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg).*)"],
+  // App icons and the manifest stay public so installed-app shortcuts show their icon before sign-in.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|icon.png|apple-icon.png|manifest.webmanifest|icons/).*)"],
 };

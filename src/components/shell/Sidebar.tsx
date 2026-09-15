@@ -2,8 +2,10 @@
 
 import clsx from "clsx";
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
+  Award,
   BookMarked,
   Brain,
   CalendarDays,
@@ -16,6 +18,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Sparkles,
   Sun,
@@ -27,6 +30,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { APP_NAME } from "@/lib/brand";
 import { classColor } from "@/lib/colors";
+import { RelativeTime } from "../RelativeTime";
 import type { ClassNode } from "@/lib/types";
 import { useHydrated, useIsDarkTheme, useLocalStorage } from "@/lib/useStorage";
 import { Button } from "../ui/Button";
@@ -46,7 +50,7 @@ export function Sidebar({
   passwordEnabled: boolean;
   onNavigate?: () => void;
 }) {
-  const { tree, aiReady, aiProvider, openAiSettings, practiceDue, openUpload, openSearch, openClassDialog } = useShell();
+  const { tree, aiReady, aiProvider, openAiSettings, openCanvas, canvas, practiceDue, openUpload, openSearch, openClassDialog } = useShell();
   const actions = useTreeActions();
   const pathname = usePathname();
   const router = useRouter();
@@ -174,6 +178,13 @@ export function Sidebar({
             </span>
           )}
         </Link>
+        <Link
+          href="/grades"
+          onClick={onNavigate}
+          className={clsx(rowBase, "px-2", pathname === "/grades" ? "bg-hover font-medium text-ink" : "text-ink-2")}
+        >
+          <Award className="size-4 text-ink-3" /> Grades
+        </Link>
 
         <div className="mt-5 mb-1 flex items-center justify-between px-2">
           <span className="text-[11px] font-semibold tracking-wider text-ink-3 uppercase">Classes</span>
@@ -218,7 +229,32 @@ export function Sidebar({
         </ul>
       </nav>
 
-      <div className="flex items-center gap-1 border-t border-line px-3 py-2.5">
+      <div className="border-t border-line px-3 pt-2">
+        <button
+          onClick={openCanvas}
+          className={clsx(
+            "-ml-1.5 flex h-8 w-[calc(100%+0.75rem)] min-w-0 items-center gap-1.5 truncate rounded-lg px-1.5 text-left text-xs transition-colors hover:bg-hover",
+            canvas.connected ? (canvas.lastSyncOk === false ? "text-[var(--tc-orange)]" : "text-ink-3 hover:text-ink") : "text-[var(--tc-orange)]",
+          )}
+          title="Canvas sync settings"
+        >
+          {canvas.connected && canvas.lastSyncOk === false ? <AlertTriangle className="size-3.5 shrink-0" /> : <RefreshCw className="size-3.5 shrink-0" />}
+          <span className="truncate">
+            {!canvas.connected ? (
+              "Connect Canvas"
+            ) : canvas.lastSyncOk === false ? (
+              "Canvas: sync problem"
+            ) : canvas.lastSyncAt ? (
+              <>
+                Canvas · <RelativeTime iso={canvas.lastSyncAt} prefix="synced " />
+              </>
+            ) : (
+              "Canvas connected"
+            )}
+          </span>
+        </button>
+      </div>
+      <div className="flex items-center gap-1 px-3 pt-0.5 pb-2.5">
         <button
           onClick={openAiSettings}
           className={clsx(

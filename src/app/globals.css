@@ -484,3 +484,25 @@ body {
   .flip-inner { transition: none; }
   .confetti-piece { display: none; }
 }
+
+/* ───────────── handwriting on the page ───────────── */
+
+/* Roomy lines leave space to write between them. */
+.ink-page[data-spacing="roomy"] .rich-note { line-height: 2.6; }
+.ink-page[data-spacing="roomy"] .rich-note p { margin: 0.7em 0; }
+.ink-page[data-spacing="roomy"] .rich-note li { margin: 0.45em 0; }
+.ink-page[data-spacing="roomy"] .rich-note h2,
+.ink-page[data-spacing="roomy"] .rich-note h3 { margin-top: 1.6em; line-height: 1.6; }
+
+/* While drawing, the note is a sheet of paper and text can't be selected by accident. */
+.ink-page[data-pen] {
+  background: var(--card);
+  box-shadow: var(--shadow);
+  min-height: 100%;
+}
+.ink-page[data-pen] .ProseMirror {
+  caret-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}

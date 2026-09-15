@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/create-shortcuts.ps1",
+    "open": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/launch.ps1",
+    "stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/stop.ps1"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

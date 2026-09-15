@@ -182,11 +182,48 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_study_log_day ON study_log(day);
   UPDATE documents SET import_method = 'ai' WHERE import_method = 'claude';
   `,
+  // 4: handwriting drawn on the note page, and roomier line spacing for writing between lines.
+  `
+  ALTER TABLE notes ADD COLUMN ink TEXT NOT NULL DEFAULT '';
+  ALTER TABLE notes ADD COLUMN line_spacing TEXT NOT NULL DEFAULT '';
+  `,
+  // 5: grades from Canvas — every graded assignment (dated or not) and each course's overall grade.
+  `
+  CREATE TABLE IF NOT EXISTS grade_items (
+    key              TEXT PRIMARY KEY,
+    course_key       TEXT NOT NULL,
+    name             TEXT NOT NULL,
+    group_name       TEXT NOT NULL DEFAULT '',
+    group_position   INTEGER NOT NULL DEFAULT 0,
+    group_weight     REAL,
+    points_possible  REAL,
+    score            REAL,
+    grade            TEXT NOT NULL DEFAULT '',
+    weight           REAL,
+    status           TEXT NOT NULL DEFAULT '',
+    due_at           TEXT,
+    url              TEXT NOT NULL DEFAULT '',
+    counts           INTEGER NOT NULL DEFAULT 1,
+    position         INTEGER NOT NULL DEFAULT 0,
+    synced_at        TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_grade_items_course ON grade_items(course_key);
+  ALTER TABLE course_links ADD COLUMN current_score REAL;
+  ALTER TABLE course_links ADD COLUMN current_grade TEXT NOT NULL DEFAULT '';
+  ALTER TABLE course_links ADD COLUMN final_score REAL;
+  ALTER TABLE course_links ADD COLUMN final_grade TEXT NOT NULL DEFAULT '';
+  ALTER TABLE course_links ADD COLUMN weighted INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE course_links ADD COLUMN grades_synced_at TEXT;
+  `,
 ];
 
 declare global {
   var __mayaDb: Database.Database | undefined;
 }
+
+// The connection survives dev hot reloads, but this module doesn't; re-checking once per module
+// load applies migrations added while `next dev` is running.
+let migrated = false;
 
 export function db(): Database.Database {
   if (!globalThis.__mayaDb) {
@@ -195,6 +232,10 @@ export function db(): Database.Database {
     conn.pragma("journal_mode = WAL");
     conn.pragma("foreign_keys = ON");
     conn.exec(SCHEMA);
+    globalThis.__mayaDb = conn;
+  }
+  if (!migrated) {
+    const conn = globalThis.__mayaDb;
     const version = conn.pragma("user_version", { simple: true }) as number;
     for (let i = version; i < MIGRATIONS.length; i++) {
       conn.transaction(() => {
@@ -202,7 +243,7 @@ export function db(): Database.Database {
         conn.pragma(`user_version = ${i + 1}`);
       })();
     }
-    globalThis.__mayaDb = conn;
+    migrated = true;
   }
   return globalThis.__mayaDb;
 }

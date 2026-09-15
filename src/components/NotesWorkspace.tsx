@@ -48,6 +48,7 @@ const TRANSCRIBE_LABEL: Record<JobStatus, string> = {
   reading: "AI is reading every page…",
   thinking: "AI is working out the structure…",
   writing: "Writing your editable notes…",
+  retrying: "The free AI is busy — retrying in a moment…",
 };
 
 function snippet(html: string) {
@@ -102,6 +103,7 @@ export function NotesWorkspace({
   const [creating, setCreating] = useState(false);
   const [moving, setMoving] = useState<WorkspaceDocument | null>(null);
   const [transcribing, setTranscribing] = useState<{ docId: number; status: JobStatus; html: string } | null>(null);
+  const [penMode, setPenMode] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
   const transcribeAbort = useRef<AbortController | null>(null);
@@ -113,6 +115,11 @@ export function NotesWorkspace({
     });
     setNotes((list) => list.map((n) => (n.id === note.id ? { ...n, updated_at: res.updated_at } : n)));
   });
+
+  // Handwriting saves separately and doesn't count as a text edit.
+  const inkSaver = useAutosave(async (note: { id: number; ink: string; line_spacing: string }) => {
+    await api(`/api/notes/${note.id}`, { method: "PATCH", json: { ink: note.ink, line_spacing: note.line_spacing } });
+  }, 900);
 
   // Merge fresh server data (new imports, AI conversions) without clobbering unsaved typing.
   const serverSig = serverNotes.map((n) => `${n.id}@${n.updated_at}`).join(",");
@@ -176,8 +183,21 @@ export function NotesWorkspace({
     [schedule, setNotes],
   );
 
+  const { schedule: scheduleInk } = inkSaver;
+  const patchInk = useCallback(
+    (id: number, patch: Partial<Pick<NoteRow, "ink" | "line_spacing">>) => {
+      const current = notesRef.current.find((n) => n.id === id);
+      if (!current) return;
+      const merged = { ...current, ...patch };
+      setNotes((list) => list.map((n) => (n.id === id ? merged : n)));
+      scheduleInk({ id, ink: merged.ink ?? "", line_spacing: merged.line_spacing ?? "" });
+    },
+    [scheduleInk, setNotes],
+  );
+
   const select = async (id: number) => {
-    await saver.flush();
+    await Promise.all([saver.flush(), inkSaver.flush()]);
+    setPenMode(false);
     setSelectedId(id);
     setMobileEditor(true);
     setListOpen(false);
@@ -471,7 +491,12 @@ export function NotesWorkspace({
   const converting = Boolean(selectedDoc && transcribing?.docId === selectedDoc.id);
 
   const editorPane = selected && (
-    <section className={clsx("min-w-0 flex-1 flex-col bg-card", isDesktop || mobileEditor ? "flex" : "hidden")}>
+    <section
+      className={clsx(
+        "min-w-0 flex-1 flex-col bg-card",
+        penMode ? "fixed inset-0 z-[55] flex" : isDesktop || mobileEditor ? "flex" : "hidden",
+      )}
+    >
       {converting ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className={clsx("flex items-center gap-3 border-b border-line py-3", pad)}>
@@ -494,12 +519,24 @@ export function NotesWorkspace({
           onUpdate={(html) => patchLocal(selected.id, { content: html })}
           onReady={(editor) => (editorRef.current = editor)}
           onExitTop={focusTitle}
+          ink={{
+            value: selected.ink ?? "",
+            lineSpacing: selected.line_spacing ?? "",
+            onChange: (json) => patchInk(selected.id, { ink: json }),
+            onLineSpacingChange: (value) => patchInk(selected.id, { line_spacing: value }),
+            penMode,
+            onPenModeChange: (on) => {
+              setPenMode(on);
+              if (!on) void inkSaver.flush();
+            },
+            title: selected.title,
+          }}
           placeholder={isImport ? "This lecture has no text yet." : undefined}
           className="min-h-0 flex-1"
           toolbarClassName="sticky top-0 z-10 px-4 sm:px-8"
-          contentClassName={clsx("overflow-y-auto pb-16", pad)}
+          contentClassName="overflow-y-auto pb-16"
           header={
-            <div className={clsx("pt-5 pb-2", pad)}>
+            <div className="mx-auto w-full max-w-[760px] px-6 pt-5 pb-2 sm:px-12">
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 {!isDesktop && (
                   <button onClick={() => setMobileEditor(false)} className="-ml-1 flex items-center gap-1 text-sm text-ink-3 hover:text-ink">

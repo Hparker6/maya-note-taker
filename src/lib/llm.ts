@@ -1,7 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { ApiError, GoogleGenAI } from "@google/genai";
-import { activeProvider, CLAUDE_MODEL, claudeKey, GEMINI_MODEL, geminiKey, type AiProvider } from "./ai-config";
+import { activeProvider, CLAUDE_MODEL, claudeKey, GEMINI_FALLBACK_MODELS, GEMINI_MODEL, geminiKey, type AiProvider } from "./ai-config";
 import type { JobStatus } from "./types";
 
 /** A problem the student can fix; its message is shown in the UI as-is. */
@@ -115,31 +115,138 @@ function geminiSchema(schema: unknown): unknown {
   );
 }
 
-async function geminiStream(system: string, parts: LlmPart[], cb: StreamCallbacks, format?: JsonSchema) {
-  const stream = await geminiClient().interactions.create({
-    model: GEMINI_MODEL,
-    input: geminiInput(parts),
-    system_instruction: system,
-    generation_config: { max_output_tokens: 65536 },
-    ...(format ? { response_format: { type: "text" as const, mime_type: "application/json", schema: geminiSchema(format) as Record<string, unknown> } } : {}),
-    stream: true,
-  });
+/** A Gemini failure worth retrying: the model is overloaded, or a free-tier limit was hit. */
+class GeminiLimit extends Error {
+  constructor(
+    message: string,
+    public kind: "busy" | "rate" | "daily",
+    public retryAfterMs?: number,
+  ) {
+    super(message);
+  }
+}
+
+function classifyGemini(message: string, status?: number): GeminiLimit | null {
+  if (status === 429 || /quota|rate.?limit|resource.?exhausted|too many requests/i.test(message)) {
+    const seconds = /retry in ([\d.]+)\s*s/i.exec(message)?.[1];
+    const daily = /per.?day|daily/i.test(message);
+    return new GeminiLimit(message, daily ? "daily" : "rate", seconds ? Number(seconds) * 1000 : undefined);
+  }
+  if ((status !== undefined && status >= 500) || /high demand|overloaded|unavailable|try again later/i.test(message)) return new GeminiLimit(message, "busy");
+  return null;
+}
+
+// Models that recently hit a limit are skipped until this time (per process).
+declare global {
+  var __mayaGeminiCooldown: Map<string, number> | undefined;
+}
+const cooldown = (globalThis.__mayaGeminiCooldown ??= new Map<string, number>());
+const COOLDOWN_MS = { busy: 60_000, rate: 30_000, daily: 60 * 60_000 };
+
+// An overloaded model sometimes accepts a request and then goes silent; give up and fall back.
+// Only real progress (a step starting or text arriving) counts, not bookkeeping events.
+const FIRST_STEP_MS = 75_000;
+const BETWEEN_STEPS_MS = 120_000;
+
+async function geminiStreamOnce(model: string, system: string, input: ReturnType<typeof geminiInput>, cb: StreamCallbacks, format?: JsonSchema) {
   let text = "";
   let status = "";
-  for await (const event of stream) {
-    if (event.event_type === "step.start") {
-      cb.status(event.step.type === "thought" ? "thinking" : "writing");
-    } else if (event.event_type === "step.delta" && event.delta.type === "text") {
-      text += event.delta.text;
-      cb.delta(event.delta.text);
-    } else if (event.event_type === "interaction.completed") {
-      status = event.interaction.status;
-    } else if (event.event_type === "error") {
-      throw new UserFacingError(`Gemini returned an error: ${event.error?.message ?? "unknown error"}`);
+  const controller = new AbortController();
+  let stalled = false;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  const arm = (ms: number) => {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      stalled = true;
+      controller.abort();
+    }, ms);
+  };
+  arm(FIRST_STEP_MS);
+  try {
+    const stream = await geminiClient().interactions.create(
+      {
+        model,
+        input,
+        system_instruction: system,
+        generation_config: { max_output_tokens: 65536 },
+        ...(format ? { response_format: { type: "text" as const, mime_type: "application/json", schema: geminiSchema(format) as Record<string, unknown> } } : {}),
+        stream: true,
+      },
+      // Limits are handled below by switching models, which is faster than the SDK's backoff.
+      { maxRetries: 0, fetchOptions: { signal: controller.signal } },
+    );
+    for await (const event of stream) {
+      if (event.event_type === "step.start" || event.event_type === "step.delta") arm(BETWEEN_STEPS_MS);
+      if (event.event_type === "step.start") {
+        cb.status(event.step.type === "thought" ? "thinking" : "writing");
+      } else if (event.event_type === "step.delta" && event.delta.type === "text") {
+        text += event.delta.text;
+        cb.delta(event.delta.text);
+      } else if (event.event_type === "interaction.completed") {
+        status = event.interaction.status;
+      } else if (event.event_type === "error") {
+        const message = event.error?.message ?? "unknown error";
+        throw classifyGemini(message) ?? new UserFacingError(`Gemini couldn't process this: ${message}`);
+      }
     }
+  } catch (err) {
+    const limit = stalled
+      ? new GeminiLimit(`${model} stopped responding`, "busy")
+      : err instanceof GeminiLimit
+        ? err
+        : err instanceof UserFacingError
+          ? null
+          : classifyGemini(err instanceof Error ? err.message : "", geminiStatus(err));
+    // Once text has streamed, retrying would duplicate it.
+    if (limit && text) throw new UserFacingError("Gemini stopped partway through. Try again.");
+    throw limit ?? err;
+  } finally {
+    clearTimeout(watchdog);
   }
   if (status === "failed" || status === "cancelled") throw new UserFacingError("Gemini couldn't finish. Try again.");
   return { text, truncated: status === "incomplete" };
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Streams from Gemini, working around the free tier: when a model is overloaded or out of
+ * requests it moves to the next model, and when all are limited it waits and tries again.
+ */
+async function geminiStream(system: string, parts: LlmPart[], cb: StreamCallbacks, format?: JsonSchema) {
+  const input = geminiInput(parts);
+  const models = [...new Set([GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS])];
+  let last: GeminiLimit | null = null;
+
+  for (let round = 0; round < 3; round++) {
+    const now = Date.now();
+    const ready = models.filter((m) => (cooldown.get(m) ?? 0) <= now);
+    const order = ready.length ? ready : models;
+    let wait = Infinity;
+
+    for (const model of order) {
+      try {
+        const result = await geminiStreamOnce(model, system, input, cb, format);
+        cooldown.delete(model);
+        return result;
+      } catch (err) {
+        if (!(err instanceof GeminiLimit)) throw err;
+        last = err;
+        const pause = err.kind === "daily" ? COOLDOWN_MS.daily : (err.retryAfterMs ?? COOLDOWN_MS[err.kind]);
+        cooldown.set(model, Date.now() + pause);
+        if (err.kind !== "daily") wait = Math.min(wait, err.retryAfterMs ?? 15_000);
+        console.warn(`[ai] ${model} ${err.kind === "busy" ? "is busy" : `hit its ${err.kind === "daily" ? "daily" : "per-minute"} limit`}; trying the next option`);
+      }
+    }
+
+    if (wait === Infinity || round === 2) break;
+    cb.status("retrying");
+    await sleep(Math.min(wait + 1_000, 65_000));
+  }
+
+  if (last?.kind === "daily") throw new UserFacingError("Today's free Gemini requests are used up. They reset tomorrow, or add a Claude key in AI settings.");
+  if (last?.kind === "rate") throw new UserFacingError("Gemini's free tier only allows a few requests per minute. Wait a minute and try again.");
+  throw new UserFacingError("Gemini is very busy right now. Try again in a few minutes.");
 }
 
 /** HTTP status of a Gemini error. The Interactions API throws its own error classes, which aren't exported. */
@@ -155,7 +262,7 @@ function geminiError(err: unknown): string | null {
   if (status === undefined) return null;
   const message = err instanceof Error ? err.message : "";
   if ((status === 400 && /api[ _]?key/i.test(message)) || status === 401 || status === 403) return "Gemini rejected the API key. Check it in AI settings.";
-  if (status === 429) return "Gemini's free tier limit was reached. Wait a minute (or until tomorrow for the daily limit) and try again.";
+  if (status === 429) return "Gemini's free tier only allows a few requests per minute. Wait a minute and try again.";
   if (status === 400) return `Gemini couldn't process this: ${message.replace(/^400\s*/, "")}`;
   return `Gemini API error (${status}). Try again shortly.`;
 }

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Greeting, NewClassCard, WelcomeActions } from "@/components/home/HomeClient";
+import { GradesWidget } from "@/components/home/GradesWidget";
 import { PracticeWidget } from "@/components/home/PracticeWidget";
 import { ThisWeek } from "@/components/home/ThisWeek";
 import { RelativeTime } from "@/components/RelativeTime";
@@ -10,6 +11,7 @@ import { upcomingEvents } from "@/lib/calendar";
 import { canvasConfigured, maybeAutoSync } from "@/lib/canvas";
 import { classColor } from "@/lib/colors";
 import { today } from "@/lib/day";
+import { listCourseGrades } from "@/lib/grades";
 import { streakInfo, totalStats } from "@/lib/practice";
 import { getRecent, getStats, getTree } from "@/lib/repo";
 
@@ -140,6 +142,7 @@ export default async function HomePage() {
         <div className="space-y-10">
         <PracticeWidget totals={totalStats(day)} streak={streakInfo(day)} />
         <ThisWeek events={upcomingEvents(20)} canvasConnected={canvasConfigured()} />
+        <GradesWidget courses={listCourseGrades()} />
         <section>
           <h2 className="mb-4 font-serif text-xl font-semibold tracking-tight">Recently</h2>
           {recent.length ? (

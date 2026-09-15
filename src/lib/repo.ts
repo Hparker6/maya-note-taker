@@ -415,6 +415,16 @@ export function updateNote(id: number, patch: { title?: string; content?: string
   return next;
 }
 
+/** Saves handwriting and page layout. Doesn't count as a text edit, so study sheets don't go stale. */
+export function updateNoteInk(id: number, patch: { ink?: string; lineSpacing?: string }) {
+  const note = getNote(id);
+  if (!note) return undefined;
+  const ink = patch.ink ?? note.ink;
+  const lineSpacing = patch.lineSpacing ?? note.line_spacing;
+  db().prepare("UPDATE notes SET ink = ?, line_spacing = ? WHERE id = ?").run(ink, lineSpacing, id);
+  return { ...note, ink, line_spacing: lineSpacing };
+}
+
 export function deleteNote(id: number) {
   const note = getNote(id);
   if (note?.kind === "import" && note.document_id) {

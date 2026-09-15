@@ -1,5 +1,6 @@
 import { mergeAttributes, Node } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
+import { newBlockId } from "@/lib/ink";
 import { activeDrawings, DrawingView } from "./DrawingView";
 import { DEFAULT_HEIGHT, DRAWING_WIDTH, MAX_HEIGHT, MIN_HEIGHT, parseStrokes, strokeOpacity, strokeToPath } from "./strokes";
 
@@ -83,7 +84,8 @@ export const Drawing = Node.create({
       insertDrawing:
         () =>
         ({ state, commands }) => {
-          const id = crypto.randomUUID();
+          // crypto.randomUUID only exists on https or localhost; this also works on an iPad over Wi-Fi.
+          const id = newBlockId();
           activeDrawings.add(id);
           const { $from } = state.selection;
           const node = { type: this.name, attrs: { id } };

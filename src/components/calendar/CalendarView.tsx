@@ -140,6 +140,9 @@ export function CalendarView({ initialCanvas }: { initialCanvas: CanvasStatus })
   const focus = focusKey ?? todayKey;
 
   const [canvas, setCanvas] = useState(initialCanvas);
+  // Canvas can also be connected or synced from the sidebar; follow the fresh server status.
+  const canvasSignature = `${initialCanvas.lastSync?.at ?? ""}|${initialCanvas.feedUrl ?? ""}|${initialCanvas.tokenHint ?? ""}|${initialCanvas.courses.length}`;
+  const [seenCanvas, setSeenCanvas] = useState(canvasSignature);
   const [data, setData] = useState<{ key: string; events: CalendarEvent[]; notes: DayNote[] } | null>(null);
   const [reload, setReload] = useState(0);
   const [hiddenClasses, setHiddenClasses] = useState<Set<number>>(new Set());
@@ -147,6 +150,11 @@ export function CalendarView({ initialCanvas }: { initialCanvas: CanvasStatus })
   const [openEvent, setOpenEvent] = useState<CalendarEvent | null>(null);
   const [form, setForm] = useState<{ event?: CalendarEvent; date?: Date } | null>(null);
   const [canvasOpen, setCanvasOpen] = useState(false);
+  if (seenCanvas !== canvasSignature) {
+    setSeenCanvas(canvasSignature);
+    setCanvas(initialCanvas);
+    setReload((r) => r + 1);
+  }
 
   const range = useMemo(() => {
     if (!focus) return null;

@@ -11,6 +11,7 @@ import {
   type SyncedEvent,
 } from "./calendar";
 import { getSetting, now, setSetting } from "./db";
+import { clearGrades, saveCourseGrades, type SyncedCourseGrades, type SyncedGradeItem } from "./grades";
 import { sanitizeRichHtml } from "./html";
 import type { CanvasStatus, EventKind } from "./types";
 
@@ -178,17 +179,27 @@ export function parseIcs(text: string, reference = Date.now()): { events: Synced
 
 // ───────────────────────────── Canvas REST API ─────────────────────────────
 
+interface ApiEnrollment {
+  type?: string;
+  computed_current_score?: number | null;
+  computed_current_grade?: string | null;
+  computed_final_score?: number | null;
+  computed_final_grade?: string | null;
+}
+
 interface ApiCourse {
   id: number;
   name: string;
   course_code: string;
   apply_assignment_group_weights?: boolean;
+  enrollments?: ApiEnrollment[];
 }
 
 interface ApiSubmission {
   workflow_state?: string;
   submitted_at?: string | null;
   score?: number | null;
+  grade?: string | null;
   missing?: boolean;
   late?: boolean;
   excused?: boolean;
@@ -204,6 +215,7 @@ interface ApiAssignment {
   submission_types?: string[];
   is_quiz_assignment?: boolean;
   omit_from_final_grade?: boolean;
+  position?: number;
   submission?: ApiSubmission;
 }
 
@@ -211,6 +223,7 @@ interface ApiAssignmentGroup {
   id: number;
   name: string;
   group_weight: number | null;
+  position?: number;
   assignments?: ApiAssignment[];
 }
 
@@ -252,9 +265,10 @@ function submissionStatus(sub?: ApiSubmission) {
 }
 
 async function fetchFromApi(base: string, token: string, reference = Date.now()) {
-  const courses = await canvasGetAll<ApiCourse>(base, token, "/api/v1/courses?enrollment_state=active&per_page=100");
+  const courses = await canvasGetAll<ApiCourse>(base, token, "/api/v1/courses?enrollment_state=active&include[]=total_scores&per_page=100");
   const events: SyncedEvent[] = [];
   const labels = new Map<string, string>();
+  const grades: SyncedCourseGrades[] = [];
 
   for (const course of courses) {
     const courseKey = `canvas-course:${course.id}`;
@@ -269,10 +283,12 @@ async function fetchFromApi(base: string, token: string, reference = Date.now())
     const counts = (a: ApiAssignment) => !a.omit_from_final_grade && (a.points_possible ?? 0) > 0;
     const courseTotal = groups.flatMap((g) => g.assignments ?? []).filter(counts).reduce((s, a) => s + (a.points_possible ?? 0), 0);
 
-    for (const group of groups) {
+    const enrollment = course.enrollments?.find((e) => e.type === "student" || e.type === "StudentEnrollment") ?? course.enrollments?.[0];
+    const items: SyncedGradeItem[] = [];
+
+    for (const [groupIndex, group] of groups.entries()) {
       const groupTotal = (group.assignments ?? []).filter(counts).reduce((s, a) => s + (a.points_possible ?? 0), 0);
-      for (const a of group.assignments ?? []) {
-        if (!a.due_at) continue;
+      for (const [index, a] of (group.assignments ?? []).entries()) {
         const points = a.points_possible ?? null;
         let weight: number | null = null;
         if (points && counts(a)) {
@@ -282,6 +298,24 @@ async function fetchFromApi(base: string, token: string, reference = Date.now())
             weight = round2((100 * points) / courseTotal);
           }
         }
+        // Every assignment counts for grades, including ones without a due date.
+        items.push({
+          key: `canvas:assignment:${a.id}`,
+          name: a.name,
+          group_name: group.name,
+          group_position: group.position ?? groupIndex,
+          group_weight: course.apply_assignment_group_weights ? (group.group_weight ?? null) : null,
+          position: a.position ?? index,
+          points_possible: points,
+          score: a.submission?.score ?? null,
+          grade: a.submission?.grade ?? "",
+          weight,
+          status: submissionStatus(a.submission),
+          due_at: a.due_at ? new Date(a.due_at).toISOString() : null,
+          url: a.html_url,
+          counts: !a.omit_from_final_grade,
+        });
+        if (!a.due_at) continue;
         const quiz = Boolean(a.is_quiz_assignment) || Boolean(a.submission_types?.includes("online_quiz"));
         events.push({
           external_key: `canvas:assignment:${a.id}`,
@@ -304,6 +338,15 @@ async function fetchFromApi(base: string, token: string, reference = Date.now())
         });
       }
     }
+    grades.push({
+      course_key: courseKey,
+      current_score: enrollment?.computed_current_score ?? null,
+      current_grade: enrollment?.computed_current_grade ?? "",
+      final_score: enrollment?.computed_final_score ?? null,
+      final_grade: enrollment?.computed_final_grade ?? "",
+      weighted: Boolean(course.apply_assignment_group_weights),
+      items,
+    });
   }
 
   // Scheduled class events (lectures, exam sessions) — max 10 contexts per request.
@@ -344,7 +387,7 @@ async function fetchFromApi(base: string, token: string, reference = Date.now())
       });
     }
   }
-  return { events, courses: labels };
+  return { events, courses: labels, grades };
 }
 
 // ───────────────────────────── sync ─────────────────────────────
@@ -399,9 +442,10 @@ async function runSync(): Promise<LastSync> {
   if (apiUrl && token) {
     sources++;
     try {
-      const { events, courses } = await fetchFromApi(apiUrl, token);
+      const { events, courses, grades } = await fetchFromApi(apiUrl, token);
       for (const [key, label] of courses) rememberCourse(key, label);
       for (const e of events) upsertSyncedEvent(e, startedAt, true);
+      saveCourseGrades(grades, startedAt);
       seen += events.length;
       sourcesOk++;
     } catch (err) {
@@ -451,6 +495,7 @@ export function saveCanvasSettings(input: { feedUrl?: string | null; apiUrl?: st
 export function disconnectCanvas() {
   for (const key of [FEED_URL, API_URL, API_TOKEN, LAST_SYNC]) setSetting(key, null);
   removeAllSyncedEvents();
+  clearGrades();
 }
 
 export function canvasStatus(): CanvasStatus {

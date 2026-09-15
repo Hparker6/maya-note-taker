@@ -269,10 +269,13 @@ export function EditorToolbar({
   editor,
   className,
   onMenuToggle = () => {},
+  onDraw,
 }: {
   editor: Editor;
   className?: string;
   onMenuToggle?: (open: boolean) => void;
+  /** Draw on the page itself; without it, Draw inserts a sketch box. */
+  onDraw?: () => void;
 }) {
   const s = useEditorState({
     editor,
@@ -321,8 +324,8 @@ export function EditorToolbar({
         </ToolButton>
         <Divider />
         <ToolButton
-          title="Draw — add a sketch for Apple Pencil, finger or mouse"
-          onClick={() => chain().insertDrawing().run()}
+          title={onDraw ? "Draw on the page with Apple Pencil, finger or mouse" : "Draw — add a sketch for Apple Pencil, finger or mouse"}
+          onClick={() => (onDraw ? onDraw() : chain().insertDrawing().run())}
           className="px-2.5 font-medium text-accent hover:text-accent"
         >
           <PenTool /> <span className="text-[13px]">Draw</span>
@@ -521,6 +524,9 @@ export function EditorToolbar({
                 </MenuRow>
                 <MenuRow onClick={run(() => chain().setHorizontalRule().run())}>
                   <Minus /> Divider line
+                </MenuRow>
+                <MenuRow onClick={run(() => chain().insertDrawing().run())}>
+                  <PenTool /> Sketch box
                 </MenuRow>
                 <div className="my-1 h-px bg-line" />
                 <MenuRow onClick={run(() => chain().unsetAllMarks().clearNodes().run())}>

@@ -123,9 +123,18 @@ export function jobStreamResponse(job: Job | undefined): Response {
   if (!job) return new Response(line({ t: "idle" }), { headers: { "Content-Type": "application/x-ndjson" } });
 
   let unsubscribe = () => {};
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
+      // Blank lines keep the connection alive while the AI is thinking quietly.
+      heartbeat = setInterval(() => {
+        try {
+          if (!closed) controller.enqueue(encoder.encode("\n"));
+        } catch {
+          closed = true;
+        }
+      }, 15_000);
       unsubscribe = subscribe(job, (event) => {
         if (closed) return;
         try {
@@ -135,6 +144,7 @@ export function jobStreamResponse(job: Job | undefined): Response {
         }
         if (event.t === "done" || event.t === "error") {
           closed = true;
+          clearInterval(heartbeat);
           queueMicrotask(() => {
             unsubscribe();
             try {
@@ -146,6 +156,7 @@ export function jobStreamResponse(job: Job | undefined): Response {
     },
     cancel() {
       // The client left; the job keeps going and saves on its own.
+      clearInterval(heartbeat);
       unsubscribe();
     },
   });

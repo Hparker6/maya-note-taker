@@ -36,6 +36,7 @@ const STATUS_LABEL: Record<JobStatus, string> = {
   reading: "Reading your material…",
   thinking: "Thinking through what matters most…",
   writing: "Writing your sheet…",
+  retrying: "The free AI is busy — retrying in a moment…",
 };
 
 export function SheetPanel({
@@ -178,7 +179,25 @@ export function SheetPanel({
         }),
       ]);
     } catch {
-      await navigator.clipboard.writeText(div.innerText);
+      try {
+        await navigator.clipboard.writeText(div.innerText);
+      } catch {
+        // The clipboard API only exists on https or localhost (not on an iPad over Wi-Fi); copy a selection instead.
+        div.style.cssText = "position:fixed;left:-10000px;top:0;white-space:pre-wrap";
+        document.body.append(div);
+        const range = document.createRange();
+        range.selectNodeContents(div);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        const copied = document.execCommand("copy");
+        selection?.removeAllRanges();
+        div.remove();
+        if (!copied) {
+          toast("Couldn't copy on this device", "error");
+          return;
+        }
+      }
     }
     toast("Copied — paste into Docs, Word, or Notion");
   };

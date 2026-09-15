@@ -9,6 +9,11 @@ const CLAUDE_KEY = "ai.anthropic_key";
 const PROVIDER = "ai.provider";
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+/** Tried in order when the main model is overloaded or out of free requests (each model has its own free quota). */
+export const GEMINI_FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS ?? "gemini-3.5-flash,gemini-3.1-flash-lite")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
 export const CLAUDE_MODEL = "claude-opus-5";
 
 /** Keys pasted in the app win over environment variables. */

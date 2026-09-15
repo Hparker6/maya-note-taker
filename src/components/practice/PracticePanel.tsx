@@ -34,6 +34,7 @@ const GEN_LABEL: Record<JobStatus, string> = {
   reading: "Reading your lectures and notes…",
   thinking: "Picking what's most testable…",
   writing: "Writing cards and questions…",
+  retrying: "Free AI is busy — retrying…",
 };
 
 const PAGE = 60;

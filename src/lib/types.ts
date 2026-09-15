@@ -50,6 +50,10 @@ export interface NoteRow {
   kind: NoteKind;
   title: string;
   content: string;
+  /** Handwriting on the page (see lib/ink.ts); "" when there is none. */
+  ink: string;
+  /** "" or "roomy" (extra space between lines for writing). */
+  line_spacing: string;
   created_at: string;
   updated_at: string;
 }
@@ -142,6 +146,55 @@ export interface CourseLink {
   label: string;
   class_id: number | null;
   event_count: number;
+}
+
+/** One Canvas assignment as it counts toward a grade. */
+export interface GradeItem {
+  key: string;
+  name: string;
+  points_possible: number | null;
+  score: number | null;
+  /** Letter or other grade text Canvas shows (e.g. "A-", "complete"). */
+  grade: string;
+  /** Estimated % of the final course grade this assignment is worth. */
+  weight: number | null;
+  /** graded, submitted, late, missing, excused, or "" (not submitted yet). */
+  status: string;
+  due_at: string | null;
+  url: string;
+  /** False when Canvas leaves it out of the final grade. */
+  counts: boolean;
+}
+
+export interface GradeGroup {
+  name: string;
+  /** % of the final grade for weighted courses. */
+  weight: number | null;
+  /** Score on graded work in this group, 0–100; null when nothing is graded yet. */
+  percent: number | null;
+  earned: number;
+  possible: number;
+  items: GradeItem[];
+}
+
+export interface CourseGrade {
+  course_key: string;
+  label: string;
+  class_id: number | null;
+  class_name: string | null;
+  class_color: string | null;
+  /** Canvas's current grade on graded work (0–100), or our own estimate when Canvas doesn't say. */
+  current_score: number | null;
+  current_grade: string;
+  /** Grade if everything ungraded counted as zero. */
+  final_score: number | null;
+  weighted: boolean;
+  /** Share of the final grade that's graded so far, in %. */
+  graded_weight: number;
+  /** % of the final grade already earned (e.g. 38.5 of the 42% graded). */
+  earned_weight: number;
+  groups: GradeGroup[];
+  synced_at: string | null;
 }
 
 export interface CanvasStatus {
@@ -272,7 +325,7 @@ export interface AiStatus {
   claudeModel: string;
 }
 
-export type JobStatus = "queued" | "reading" | "thinking" | "writing";
+export type JobStatus = "queued" | "reading" | "thinking" | "writing" | "retrying";
 
 /** Events streamed (as NDJSON) while a study sheet is generated. */
 export type JobEvent =
