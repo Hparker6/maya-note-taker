@@ -216,11 +216,12 @@ export function parseShareFile(text: string): ShareBundle {
 }
 
 /** Adds a shared notebook as a new class. Everything is re-validated and sanitized. */
-export function importBundle(bundle: ShareBundle): { classId: number; notes: number } {
+export function importBundle(bundle: ShareBundle): { classId: number; notes: number; inkDropped: number } {
   const d = db();
   const klass = bundle.class;
   let notes = 0;
   let classId = 0;
+  let inkDropped = 0;
   d.transaction(() => {
     classId = createClass({
       name: str(klass.name, 200).trim() || "Shared notes",
@@ -242,7 +243,10 @@ export function importBundle(bundle: ShareBundle): { classId: number; notes: num
           let ink = "";
           try {
             ink = sanitizeInk(note?.ink ?? "");
-          } catch {}
+          } catch {
+            // The text still imports; the importer is told the handwriting couldn't be read.
+            inkDropped++;
+          }
           const title = str(note?.title, 200);
           const content = sanitizeRichHtml(str(note?.html, 8_000_000));
           const noteId = Number(
@@ -269,5 +273,5 @@ export function importBundle(bundle: ShareBundle): { classId: number; notes: num
       }
     }
   })();
-  return { classId, notes };
+  return { classId, notes, inkDropped };
 }

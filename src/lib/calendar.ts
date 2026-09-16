@@ -246,9 +246,17 @@ export function pruneSyncedEvents(syncStartedAt: string) {
     .run(syncStartedAt).changes;
 }
 
+/** Disconnecting drops synced events, but anything the student wrote on or ticked off becomes her own event. */
 export function removeAllSyncedEvents() {
-  db().prepare("DELETE FROM events WHERE source = 'canvas'").run();
-  db().prepare("DELETE FROM course_links").run();
+  const d = db();
+  d.transaction(() => {
+    d.prepare(
+      `UPDATE events SET source = 'manual', external_key = NULL, synced_at = NULL, updated_at = ?
+       WHERE source = 'canvas' AND (my_notes != '' OR done = 1)`,
+    ).run(now());
+    d.prepare("DELETE FROM events WHERE source = 'canvas'").run();
+    d.prepare("DELETE FROM course_links").run();
+  })();
 }
 
 export function countSyncedEvents() {

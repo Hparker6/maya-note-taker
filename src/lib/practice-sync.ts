@@ -13,28 +13,48 @@ interface Job {
 const STORAGE_KEY = "maya:unsent-practice";
 
 let queue: Job[] | null = null;
+/** Keys this tab has already sent, so a copy left in storage by another tab isn't sent twice. */
+const sent = new Set<string>();
 let running = false;
 let attempt = 0;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
 const drainedWaiters = new Set<() => void>();
 
+function stored(): Job[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((j) => typeof j?.url === "string" && typeof j?.body?.key === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function jobs(): Job[] {
   if (queue) return queue;
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-    queue = Array.isArray(stored) ? stored.filter((j) => typeof j?.url === "string" && typeof j?.body?.key === "string") : [];
-  } catch {
-    queue = [];
-  }
+  queue = stored();
   const kick = () => void pump();
   window.addEventListener("online", kick);
   window.addEventListener("focus", kick);
   document.addEventListener("visibilitychange", kick);
+  // Another tab may be queueing answers too; take on anything it left behind.
+  window.addEventListener("storage", (e) => {
+    if (e.key !== STORAGE_KEY) return;
+    adopt();
+    void pump();
+  });
   return queue;
+}
+
+/** Merges in anything another tab stored, keyed by the id each update carries (never one already sent). */
+function adopt() {
+  if (!queue) return;
+  const known = new Set([...queue.map((j) => j.body.key), ...sent]);
+  for (const job of stored()) if (!known.has(job.body.key)) queue.push(job);
 }
 
 function persist() {
   try {
+    adopt();
     if (queue?.length) localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
     else localStorage.removeItem(STORAGE_KEY);
   } catch {}
@@ -58,6 +78,8 @@ async function pump() {
         // Rejected for good (e.g. the card was deleted): nothing to retry.
         console.warn("[practice] dropped an update the server rejected:", err);
       }
+      sent.add(job.body.key);
+      if (sent.size > 500) sent.delete(sent.values().next().value!);
       list.shift();
       attempt = 0;
       persist();

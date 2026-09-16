@@ -125,8 +125,10 @@ export function Sidebar({
     const form = new FormData();
     form.set("file", file);
     try {
-      const result = await api<{ classId: number; notes: number }>("/api/share/import", { form });
+      const result = await api<{ classId: number; notes: number; inkDropped: number }>("/api/share/import", { form });
       toast(`Imported ${result.notes} note${result.notes === 1 ? "" : "s"} from a classmate`);
+      if (result.inkDropped)
+        toast(`The handwriting on ${result.inkDropped} note${result.inkDropped === 1 ? "" : "s"} couldn't be read, so only the text came through.`, "info");
       router.push(`/classes/${result.classId}`);
       router.refresh();
       onNavigate?.();

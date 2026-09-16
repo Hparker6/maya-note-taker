@@ -70,7 +70,8 @@ export function CanvasDialog({
   const disconnect = async () => {
     const ok = await confirm({
       title: "Disconnect Canvas?",
-      message: "The saved link and token are removed and synced Canvas events disappear from your calendar. Events you added yourself stay.",
+      message:
+        "The saved link, token and grades are removed, and synced Canvas events disappear from your calendar. Events you added yourself stay, and so do any assignments you wrote notes on or ticked off — they become your own events.",
       confirmLabel: "Disconnect",
       danger: true,
     });
