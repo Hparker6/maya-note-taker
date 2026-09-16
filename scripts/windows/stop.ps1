@@ -1,10 +1,10 @@
-# Stops Maya's Notebook if it's running in the background (started by the desktop shortcut).
+# Stops Houston's Little Surprise if it's running in the background (started by the desktop shortcut).
 $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $Port = if ($env:NOTEBOOK_PORT) { [int]$env:NOTEBOOK_PORT } else { 3000 }
 
 $listeners = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
 if (-not $listeners) {
-  Write-Host "Maya's Notebook isn't running."
+  Write-Host "Houston's Little Surprise isn't running."
   exit 0
 }
 
@@ -20,7 +20,7 @@ foreach ($owner in ($listeners.OwningProcess | Sort-Object -Unique)) {
       $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($parent.ParentProcessId)"
     }
     foreach ($p in $chain) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
-    Write-Host "Stopped Maya's Notebook."
+    Write-Host "Stopped Houston's Little Surprise."
   } else {
     Write-Host "Something else is using port $Port, so nothing was stopped."
   }

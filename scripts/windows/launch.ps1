@@ -1,4 +1,4 @@
-# Opens Maya's Notebook: starts the app in the background if it isn't running (building it first
+# Opens Houston's Little Surprise: starts the app in the background if it isn't running (building it first
 # after a fresh download or an update), then opens it in its own window like a desktop app.
 param([switch]$NoBrowser)
 
@@ -13,7 +13,7 @@ $Log = Join-Path $DataDir "server.log"
 
 Add-Type -AssemblyName PresentationFramework
 function Show-Problem([string]$Message) {
-  [System.Windows.MessageBox]::Show($Message, "Maya's Notebook", "OK", "Warning") | Out-Null
+  [System.Windows.MessageBox]::Show($Message, "Houston's Little Surprise", "OK", "Warning") | Out-Null
 }
 
 function Test-Running {
@@ -42,7 +42,7 @@ if (-not (Test-Running)) {
 
   if ($needsInstall -or $builtAt -lt $lastCommit) {
     $steps = if ($needsInstall) { "npm install && npm run build" } else { "npm run build" }
-    $setup = Start-Process -FilePath "cmd.exe" -WorkingDirectory $Root -Wait -PassThru -ArgumentList "/c", "title Setting up Maya's Notebook && echo Getting Maya's Notebook ready. The first time takes a few minutes... && $steps"
+    $setup = Start-Process -FilePath "cmd.exe" -WorkingDirectory $Root -Wait -PassThru -ArgumentList "/c", "title Setting up Houston's Little Surprise && echo Getting Houston's Little Surprise ready. The first time takes a few minutes... && $steps"
     if ($setup.ExitCode -ne 0) {
       Show-Problem "Setup didn't finish. Open a terminal in the maya-note-taker folder and run 'npm install' and then 'npm run build' to see what went wrong."
       exit 1

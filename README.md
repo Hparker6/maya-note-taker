@@ -1,4 +1,4 @@
-# Maya's Notebook
+# Houston's Little Surprise
 
 A study notebook for course PDFs. Organize everything by **class → section → unit**. Imported PDFs become formatted, editable notes you can highlight, type in, and write on by hand with an Apple Pencil. AI turns it all into **dense, printable study sheets**, and **flashcards and quizzes** help it stick. Canvas brings in due dates, exams and your **grades**.
 
@@ -98,9 +98,9 @@ Open it like any other app, without a terminal:
    npm run shortcut
    ```
 
-   This adds a **Maya's Notebook** icon to your Desktop and Start menu.
+   This adds a **Houston's Little Surprise** icon to your Desktop and Start menu.
 2. Double-click the icon. The app starts in the background and opens in its own window. The first time, and after updates, a window shows it getting ready for a few minutes.
-3. **Pin to the taskbar:** open Start, find **Maya's Notebook**, right-click it and choose **Pin to taskbar**.
+3. **Pin to the taskbar:** open Start, find **Houston's Little Surprise**, right-click it and choose **Pin to taskbar**.
 
 The app keeps running in the background after you close its window, so it opens instantly next time. To stop it, run `npm run stop`.
 

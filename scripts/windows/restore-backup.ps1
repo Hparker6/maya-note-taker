@@ -68,4 +68,4 @@ foreach ($suffix in "", "-wal", "-shm") { Remove-Item "$Db$suffix" -Force -Error
 Copy-Item $chosen.FullName $Db
 Write-Host ""
 Write-Host "Restored the copy from $($chosen.LastWriteTime.ToString('ddd d MMM yyyy, HH:mm'))." -ForegroundColor Green
-Write-Host "Open Maya's Notebook again to use it."
+Write-Host "Open Houston's Little Surprise again to use it."
