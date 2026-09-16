@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { ArrowRight, Brain, CalendarClock, Check, Flame, Layers, ListChecks, Sparkles, Target } from "lucide-react";
 import Link from "next/link";
 import { classColor } from "@/lib/colors";
-import type { PracticeStats, StreakInfo, UnitPracticeSummary } from "@/lib/types";
+import type { PracticeStats, StreakInfo, UnitPracticeSummary, WeakSpot } from "@/lib/types";
 import { useHydrated } from "@/lib/useStorage";
 import { useShell } from "../shell/ShellContext";
 import { Button } from "../ui/Button";
@@ -38,6 +38,7 @@ export function PracticeHome({
   summaries,
   upcoming,
   suggestions,
+  weak,
   hasClasses,
 }: {
   totals: PracticeStats;
@@ -45,6 +46,7 @@ export function PracticeHome({
   summaries: UnitPracticeSummary[];
   upcoming: UpcomingTest[];
   suggestions: Suggestion[];
+  weak: WeakSpot[];
   hasClasses: boolean;
 }) {
   const { startStudy } = useShell();
@@ -106,6 +108,39 @@ export function PracticeHome({
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {weak.length > 0 && (
+        <section className="mt-10">
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <h2 className="flex items-center gap-2 font-serif text-xl font-semibold tracking-tight">
+              <Target className="size-5 text-[var(--tc-red)]" /> Weak spots
+            </h2>
+            <span className="text-sm text-ink-3">
+              {weak.length} thing{weak.length === 1 ? "" : "s"} you keep missing
+            </span>
+            <Button size="sm" variant="primary" className="ml-auto" onClick={() => startStudy({ mode: "weak" })}>
+              <Target /> Drill these
+            </Button>
+          </div>
+          <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-[color-mix(in_oklab,var(--tc-red)_30%,var(--line))] bg-card shadow-[var(--shadow-sm)]">
+            {weak.slice(0, 6).map((spot) => (
+              <li key={`${spot.kind}:${spot.id}`} className="flex items-start gap-3 px-4 py-3">
+                <span className="mt-1 size-2 shrink-0 rounded-full" style={{ background: classColor(spot.classColor) }} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm break-words">{spot.text}</span>
+                  <Link href={`/units/${spot.unitId}?tab=practice`} className="mt-0.5 block truncate text-xs text-ink-3 hover:text-accent">
+                    {spot.className} › {spot.unitName}
+                  </Link>
+                </span>
+                <span className="shrink-0 text-[11.5px] text-ink-3 tabular-nums">
+                  {spot.kind === "card" ? `forgotten ${spot.missed}×` : `${spot.seen - spot.missed}/${spot.seen} right`}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {weak.length > 6 && <p className="mt-2 text-xs text-ink-3">and {weak.length - 6} more — drilling covers them too.</p>}
         </section>
       )}
 

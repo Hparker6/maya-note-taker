@@ -11,6 +11,8 @@ import {
   Download,
   FileSearch,
   FileText,
+  FileType2,
+  Printer,
   RefreshCw,
   Share2,
   FolderInput,
@@ -393,6 +395,29 @@ export function NotesWorkspace({
     }
   };
 
+  /** Saves the note as a file. Everything typed is saved first, so the copy is up to date. */
+  const saveCopy = async (note: NoteRow, format: "pdf" | "word") => {
+    if (!(await flushNote(note.id))) {
+      toast("Saving your latest edits first — try again in a moment.", "error");
+      return;
+    }
+    const url = `/api/notes/${note.id}/export?format=${format}`;
+    if (format === "word") {
+      // The response is an attachment, so this downloads without leaving the page.
+      const link = document.createElement("a");
+      link.href = url;
+      link.rel = "noopener";
+      document.body.append(link);
+      link.click();
+      link.remove();
+      toast("Saved as a Word document — check your downloads. Handwriting only comes through in PDF.", "info");
+      return;
+    }
+    // A tab, so the browser's own print window can offer "Save as PDF" (and "Save to Files" on an iPad).
+    const tab = window.open(url, "_blank");
+    if (!tab) toast("Allow pop-ups for this site to save a PDF, or use the Word option.", "error");
+  };
+
   const togglePanel = (which: Exclude<SidePanel, null>) => setPanel((p) => (p === which ? null : which));
 
   const docStatus = (doc: WorkspaceDocument | undefined, note: NoteRow) => {
@@ -663,9 +688,29 @@ export function NotesWorkspace({
           footer={(ed) => (
             <div className={clsx("flex items-center justify-between border-t border-line py-2 text-xs text-ink-3", pad)}>
               <WordCount editor={ed} />
+              <Menu
+                triggerClassName="ml-auto flex items-center gap-1.5 text-xs text-ink-3 hover:text-accent"
+                trigger={
+                  <>
+                    <Download className="size-3.5" /> Save a copy
+                  </>
+                }
+                items={[
+                  {
+                    label: "PDF (keeps handwriting)",
+                    icon: <Printer />,
+                    onSelect: () => void saveCopy(selected, "pdf"),
+                  },
+                  {
+                    label: "Word document",
+                    icon: <FileType2 />,
+                    onSelect: () => void saveCopy(selected, "word"),
+                  },
+                ]}
+              />
               <button
                 onClick={() => openShare({ scope: "note", id: selected.id, title: selected.title || "Untitled note" })}
-                className="ml-auto flex items-center gap-1.5 hover:text-accent"
+                className="ml-4 flex items-center gap-1.5 hover:text-accent"
                 title="Share with classmates"
               >
                 <Share2 className="size-3.5" /> Share

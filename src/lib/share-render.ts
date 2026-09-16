@@ -2,7 +2,7 @@ import "server-only";
 import { APP_NAME } from "./brand";
 import { classColor } from "./colors";
 import { PAGE_WIDTH } from "./ink";
-import type { ShareBundle, SharedNote, SharedUnit } from "./share";
+import type { ShareBundle, SharedInkStroke, SharedNote, SharedUnit } from "./share";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 /** JSON that can sit inside <script> without ending it early. */
@@ -87,6 +87,28 @@ const INK_SCRIPT = `
   if(document.fonts&&document.fonts.ready)document.fonts.ready.then(layout);
 })();
 `;
+
+/** Rough bottom edge of the handwriting, for a page that can't measure it in a browser. */
+function inkExtent(paths: SharedInkStroke[]) {
+  let bottom = 0;
+  for (const stroke of paths) {
+    for (const pair of stroke.d.match(/-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?/g) ?? []) {
+      const y = Number(pair.split(",")[1]);
+      if (Number.isFinite(y)) bottom = Math.max(bottom, y + (stroke.ay ?? 0));
+    }
+  }
+  return Math.ceil(bottom + 40);
+}
+
+/** Handwriting drawn where it was when written — for files opened somewhere that can't run the layout script. */
+function staticInk(paths: SharedInkStroke[]) {
+  if (!paths.length) return "";
+  const height = inkExtent(paths);
+  const svg = `<svg class="ink" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE_WIDTH} ${height}" style="height:${height}px" aria-label="Handwriting">`;
+  return `${svg}${paths
+    .map((s) => `<path d="${esc(s.d)}" transform="translate(0 ${s.ay ?? 0})" style="fill:${esc(s.c)};fill-opacity:${s.o}"/>`)
+    .join("")}</svg>`;
+}
 
 function noteHtml(note: SharedNote) {
   const ink = note.paths.length ? ` data-ink="${esc(JSON.stringify(note.paths))}"` : "";
@@ -173,6 +195,56 @@ export function renderShareHtml(bundle: ShareBundle, options: { downloadUrl?: st
 </body>
 </html>`;
 }
+
+/**
+ * One note as a standalone document, for saving a copy.
+ * `forWord` places handwriting where it was drawn (Word can't run the layout script); the printable
+ * version measures the text in the browser first, so the ink lands exactly where it does in the app.
+ */
+export function renderNoteDocument(options: { title: string; context: string; updatedAt: string; note: SharedNote; forWord: boolean }) {
+  const { note, forWord } = options;
+  const date = new Date(options.updatedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const page = forWord
+    ? `<div class="page"${note.line_spacing === "roomy" ? ` data-spacing="roomy"` : ""}>
+    <div class="rich">${note.html}</div>
+    ${staticInk(note.paths)}
+  </div>`
+    : `<div class="page"${note.paths.length ? ` data-ink="${esc(JSON.stringify(note.paths))}"` : ""}${note.line_spacing === "roomy" ? ` data-spacing="roomy"` : ""}>
+    <div class="rich">${note.html}</div>
+    ${note.paths.length ? `<svg class="ink" xmlns="http://www.w3.org/2000/svg" aria-label="Handwriting"></svg>` : ""}
+  </div>`;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${esc(options.title)}</title>
+<style>${CSS}
+.wrap{padding-top:28px}
+.note{border:0;background:transparent}
+.page{padding:8px 0 24px}
+@media print{.actions,.hint{display:none}.wrap{padding:0}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">${esc(APP_NAME)}</div>
+  <h1 class="title">${esc(options.title)}</h1>
+  <p class="meta">${esc(options.context)} · ${esc(date)}</p>
+  ${forWord ? "" : `<div class="actions"><a class="btn primary" href="#" onclick="window.print();return false">Save as PDF</a></div>
+  <p class="hint">Your browser's print window opens by itself — choose <strong>Save as PDF</strong> as the printer.</p>`}
+  <article class="note">${page}</article>
+</div>
+${forWord ? "" : `<script>${INK_SCRIPT}</script>\n<script>window.addEventListener("load",function(){setTimeout(function(){window.print()},400)})</script>`}
+</body>
+</html>`;
+}
+
+/** A file name that is safe on Windows, macOS and iPadOS. */
+export const exportFileName = (title: string, extension: string) =>
+  `${title.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "Note"}.${extension}`;
 
 export const shareFileName = (bundle: ShareBundle) =>
   `${bundle.title.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "Shared notes"} - shared notes.html`;

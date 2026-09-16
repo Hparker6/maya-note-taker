@@ -19,7 +19,7 @@ export interface StudyRequest {
 type QueueItem = SessionItem & { attempt: number; uid: string };
 
 const PRAISE = ["Nice!", "Correct!", "You got it!", "Great job!", "Exactly!", "Well done!"];
-const MODE_LABEL: Record<StudyMode, string> = { review: "Flashcards", cram: "Cram", quiz: "Quiz" };
+const MODE_LABEL: Record<StudyMode, string> = { review: "Flashcards", cram: "Cram", quiz: "Quiz", weak: "Weak spots" };
 
 export function sessionUrl(req: StudyRequest) {
   const params = new URLSearchParams({ mode: req.mode });
@@ -770,7 +770,17 @@ function FinishScreen({
 
       <div className="mt-8 flex w-full max-w-md flex-col-reverse gap-3 sm:flex-row">
         <button onClick={onAgain} className={clsx(bigButton("secondary"), "flex-1")}>
-          {session.mode === "review" ? (session.remaining > 0 ? `Keep going (${session.remaining})` : "Review more") : quiz ? "New quiz" : "Cram again"}
+          {session.mode === "review"
+            ? session.remaining > 0
+              ? `Keep going (${session.remaining})`
+              : "Review more"
+            : session.mode === "weak"
+              ? session.remaining > 0
+                ? `Keep drilling (${session.remaining})`
+                : "Drill again"
+              : quiz
+                ? "New quiz"
+                : "Cram again"}
         </button>
         <button onClick={onDone} className={clsx(bigButton("primary"), "flex-1")} autoFocus>
           Continue
@@ -787,13 +797,17 @@ function EmptySession({ mode, onSwitch, onClose }: { mode: StudyMode; onSwitch: 
         <Check className="size-10 stroke-[3]" />
       </div>
       <div>
-        <h2 className="font-serif text-2xl font-semibold">{mode === "review" ? "All caught up!" : "Nothing to practice yet"}</h2>
+        <h2 className="font-serif text-2xl font-semibold">
+          {mode === "review" ? "All caught up!" : mode === "weak" ? "No weak spots right now" : "Nothing to practice yet"}
+        </h2>
         <p className="mx-auto mt-2 max-w-sm text-ink-3">
           {mode === "review"
             ? "No flashcards are due right now. Come back tomorrow, or keep the momentum going below."
-            : mode === "quiz"
-              ? "A quiz needs at least 4 flashcards (or AI quiz questions) to choose answers from."
-              : "Make some flashcards from your notes first."}
+            : mode === "weak"
+              ? "Nothing has tripped you up yet. Cards you forget, and quiz questions you miss, show up here to drill."
+              : mode === "quiz"
+                ? "A quiz needs at least 4 flashcards (or AI quiz questions) to choose answers from."
+                : "Make some flashcards from your notes first."}
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-3">

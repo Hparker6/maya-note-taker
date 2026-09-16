@@ -13,6 +13,7 @@ import {
   ScanText,
   Search,
   Sparkles,
+  Target,
   Trash2,
   Wand2,
   Zap,
@@ -160,7 +161,7 @@ export function PracticePanel({
     void refresh();
   };
 
-  const { stats, cards, questions } = data;
+  const { stats, cards, questions, weak } = data;
   const toReview = stats.due + Math.min(stats.new, 10);
   const canQuiz = stats.total >= 4 || questions.length > 0;
   const empty = stats.total === 0 && questions.length === 0;
@@ -189,6 +190,16 @@ export function PracticePanel({
       badge: null,
       disabled: !canQuiz,
       onClick: () => startStudy({ mode: "quiz", unitId }),
+    },
+    {
+      id: "weak" as const,
+      title: "Weak spots",
+      icon: Target,
+      color: "var(--tc-red)",
+      subtitle: weak.length ? "Drill what you keep missing" : "Nothing is giving you trouble",
+      badge: weak.length || null,
+      disabled: weak.length === 0,
+      onClick: () => startStudy({ mode: "weak", unitId }),
     },
     {
       id: "cram" as const,
@@ -283,7 +294,7 @@ export function PracticePanel({
           </div>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {modes.map((m) => (
                 <button
                   key={m.id}
@@ -316,6 +327,39 @@ export function PracticePanel({
               </div>
               <MasteryBar stats={stats} legend />
             </div>
+
+            {weak.length > 0 && (
+              <section className="mt-6 overflow-hidden rounded-2xl border border-[color-mix(in_oklab,var(--tc-red)_30%,var(--line))] bg-card">
+                <div className="flex flex-wrap items-center gap-3 border-b border-line bg-[color-mix(in_oklab,var(--tc-red)_7%,transparent)] px-5 py-3">
+                  <Target className="size-4 text-[var(--tc-red)]" />
+                  <span className="min-w-0 flex-1 text-sm font-semibold">
+                    What keeps tripping you up
+                    <span className="ml-2 font-normal text-ink-3">
+                      {weak.length} item{weak.length === 1 ? "" : "s"}
+                    </span>
+                  </span>
+                  <Button size="sm" variant="primary" onClick={() => startStudy({ mode: "weak", unitId })}>
+                    <Target /> Drill these
+                  </Button>
+                </div>
+                <ul className="divide-y divide-line">
+                  {weak.slice(0, 6).map((spot) => (
+                    <li key={`${spot.kind}:${spot.id}`} className="flex items-start gap-3 px-5 py-2.5">
+                      <span className="mt-0.5 shrink-0 text-ink-3" title={spot.kind === "card" ? "Flashcard" : "Quiz question"}>
+                        {spot.kind === "card" ? <Layers className="size-3.5" /> : <ListChecks className="size-3.5" />}
+                      </span>
+                      <span className="min-w-0 flex-1 text-[13.5px] break-words">{spot.text}</span>
+                      <span className="shrink-0 text-[11.5px] text-ink-3 tabular-nums">
+                        {spot.kind === "card"
+                          ? `forgotten ${spot.missed}×`
+                          : `${spot.seen - spot.missed}/${spot.seen} right`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {weak.length > 6 && <p className="px-5 py-2 text-[11.5px] text-ink-3">and {weak.length - 6} more</p>}
+              </section>
+            )}
           </>
         )}
 

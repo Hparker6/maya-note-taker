@@ -1,7 +1,7 @@
 import { today } from "@/lib/day";
 import { handler, notFound, parseId } from "@/lib/http";
 import { isTaskRunning, practiceKey } from "@/lib/jobs";
-import { addCardsFromNotes, listCards, listQuestions, unitStats } from "@/lib/practice";
+import { addCardsFromNotes, listCards, listQuestions, listWeakSpots, unitStats } from "@/lib/practice";
 import { getUnitContext } from "@/lib/repo";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -11,6 +11,7 @@ async function overview(unitId: number) {
     stats: unitStats(unitId, await today()),
     cards: listCards(unitId),
     questions: listQuestions(unitId),
+    weak: listWeakSpots({ unitId }),
     generating: isTaskRunning(practiceKey(unitId)),
   };
 }

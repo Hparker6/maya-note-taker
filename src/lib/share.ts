@@ -70,7 +70,7 @@ export interface ShareBundle {
 const inkPaths = (ink: string): SharedInkStroke[] =>
   parseInk(ink).map((s) => ({ d: strokeToPath(s), c: s.c, o: strokeOpacity(s), ...(s.a ? { a: s.a, ay: s.ay } : {}) }));
 
-function sharedNote(note: NoteRow): SharedNote {
+export function sharedNote(note: NoteRow): SharedNote {
   return {
     title: note.title || "Untitled note",
     kind: note.kind === "import" ? "lecture" : "note",

@@ -3,7 +3,7 @@ import { connection } from "next/server";
 import { PracticeHome } from "@/components/practice/PracticeHome";
 import { upcomingTests } from "@/lib/calendar";
 import { today } from "@/lib/day";
-import { practiceSummaries, streakInfo, totalStats } from "@/lib/practice";
+import { listWeakSpots, practiceSummaries, streakInfo, totalStats } from "@/lib/practice";
 import { getTree } from "@/lib/repo";
 
 export const metadata: Metadata = { title: "Practice" };
@@ -44,6 +44,7 @@ export default async function PracticePage() {
       summaries={summaries}
       upcoming={upcoming}
       suggestions={suggestions.slice(0, 8)}
+      weak={listWeakSpots({})}
       hasClasses={tree.length > 0}
     />
   );

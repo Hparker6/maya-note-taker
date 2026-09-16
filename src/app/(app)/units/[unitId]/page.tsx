@@ -6,7 +6,7 @@ import { aiConfigured } from "@/lib/ai";
 import { ensureImports } from "@/lib/imports";
 import { today } from "@/lib/day";
 import { isRunning, isTaskRunning, practiceKey, transcriptKey } from "@/lib/jobs";
-import { listCards, listQuestions, unitStats } from "@/lib/practice";
+import { listCards, listQuestions, listWeakSpots, unitStats } from "@/lib/practice";
 import { getUnitContext, listDocuments, listNotes } from "@/lib/repo";
 import { sheetState } from "@/lib/sheets";
 
@@ -39,6 +39,7 @@ export default async function UnitPage({ params, searchParams }: Props) {
     stats: unitStats(id, await today()),
     cards: listCards(id),
     questions: listQuestions(id),
+    weak: listWeakSpots({ unitId: id }),
     generating: isTaskRunning(practiceKey(id)),
   };
 

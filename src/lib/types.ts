@@ -258,9 +258,27 @@ export interface PracticeStats {
   learning: number;
   known: number;
   mastered: number;
+  /** Forgotten at least once, or still not sticking — what "weak spots" drills. */
+  weak: number;
 }
 
-export type StudyMode = "review" | "cram" | "quiz";
+export type StudyMode = "review" | "cram" | "quiz" | "weak";
+
+/** Something the student keeps getting wrong, for the weak-spots list. */
+export interface WeakSpot {
+  kind: "card" | "question";
+  id: number;
+  /** The card's front, or the question's prompt. */
+  text: string;
+  unitId: number;
+  unitName: string;
+  className: string;
+  classColor: string;
+  /** Times forgotten (cards) or answered wrong (questions). */
+  missed: number;
+  /** Times answered, for questions. */
+  seen: number;
+}
 
 export type SessionItem =
   | { type: "card"; key: string; card: CardRow; context: string }
@@ -300,6 +318,8 @@ export interface UnitPracticeData {
   stats: PracticeStats;
   cards: CardRow[];
   questions: QuizQuestionRow[];
+  /** What she keeps getting wrong in this unit, worst first. */
+  weak: WeakSpot[];
   generating: boolean;
 }
 

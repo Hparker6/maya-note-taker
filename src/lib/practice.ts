@@ -15,6 +15,7 @@ import type {
   StudyMode,
   StudySession,
   UnitPracticeSummary,
+  WeakSpot,
 } from "./types";
 
 const CARD_COLUMNS =
@@ -26,6 +27,7 @@ const REVIEW_SESSION = 20;
 const NEW_PER_SESSION = 10;
 const CRAM_SESSION = 50;
 const QUIZ_SIZE = 10;
+const WEAK_SESSION = 15;
 
 // ───────────────────────────── cards ─────────────────────────────
 
@@ -205,13 +207,17 @@ export function addQuestions(unitId: number, questions: { prompt: string; choice
 
 // ───────────────────────────── stats ─────────────────────────────
 
+/** Cards she has forgotten at least once, or that still aren't sticking after several goes. */
+const WEAK_CARD = "(c.lapses > 0 OR (c.reps >= 3 AND c.interval_days <= 2))";
+
 const STATS_SELECT = `
   COUNT(c.id) AS total,
   COALESCE(SUM(c.due_day = ''), 0) AS new,
   COALESCE(SUM(c.due_day != '' AND c.due_day <= @today), 0) AS due,
   COALESCE(SUM(c.due_day != '' AND c.interval_days < 7), 0) AS learning,
   COALESCE(SUM(c.due_day != '' AND c.interval_days >= 7 AND c.interval_days < 21), 0) AS known,
-  COALESCE(SUM(c.due_day != '' AND c.interval_days >= 21), 0) AS mastered`;
+  COALESCE(SUM(c.due_day != '' AND c.interval_days >= 21), 0) AS mastered,
+  COALESCE(SUM(${WEAK_CARD}), 0) AS weak`;
 
 export function unitStats(unitId: number, today: string): PracticeStats {
   return db().prepare(`SELECT ${STATS_SELECT} FROM cards c WHERE c.unit_id = @unit`).get({ unit: unitId, today }) as PracticeStats;
@@ -363,6 +369,41 @@ function cardQuestion(card: ScopedCard, pool: ScopedCard[], scope: SessionScope)
   return null;
 }
 
+// ───────────────────────────── weak spots ─────────────────────────────
+
+/** Questions she gets wrong more often than not (after enough tries to mean something). */
+const WEAK_QUESTION = "q.times_seen >= 2 AND q.times_correct * 2 < q.times_seen";
+
+const scopeWhere = (scope: SessionScope, column: string) =>
+  scope.unitId ? `${column} = @unit` : scope.classId ? "s.class_id = @class" : "1 = 1";
+
+const scopeArgs = (scope: SessionScope) => ({ unit: scope.unitId ?? null, class: scope.classId ?? null });
+
+/** What she keeps getting wrong, worst first: forgotten cards and often-missed quiz questions. */
+export function listWeakSpots(scope: SessionScope, limit = 50): WeakSpot[] {
+  const d = db();
+  const context = "JOIN units u ON u.id = %.unit_id JOIN sections s ON s.id = u.section_id JOIN classes k ON k.id = s.class_id";
+  const cards = d
+    .prepare(
+      `SELECT 'card' AS kind, c.id, c.front AS text, u.id AS unitId, u.name AS unitName, k.name AS className, k.color AS classColor,
+              c.lapses AS missed, c.reps AS seen
+       FROM cards c ${context.replace(/%/g, "c")}
+       WHERE ${scopeWhere(scope, "c.unit_id")} AND ${WEAK_CARD}
+       ORDER BY c.lapses DESC, c.interval_days ASC, c.id`,
+    )
+    .all(scopeArgs(scope)) as WeakSpot[];
+  const questions = d
+    .prepare(
+      `SELECT 'question' AS kind, q.id, q.prompt AS text, u.id AS unitId, u.name AS unitName, k.name AS className, k.color AS classColor,
+              q.times_seen - q.times_correct AS missed, q.times_seen AS seen
+       FROM quiz_questions q ${context.replace(/%/g, "q")}
+       WHERE ${scopeWhere(scope, "q.unit_id")} AND ${WEAK_QUESTION}
+       ORDER BY (q.times_seen - q.times_correct) DESC, q.id`,
+    )
+    .all(scopeArgs(scope)) as WeakSpot[];
+  return [...cards, ...questions].sort((a, b) => b.missed - a.missed || a.text.localeCompare(b.text)).slice(0, limit);
+}
+
 export function buildSession(mode: StudyMode, scope: SessionScope, today: string): StudySession {
   const title = scopeTitle(scope);
   const unitId = scope.unitId ?? null;
@@ -394,6 +435,47 @@ export function buildSession(mode: StudyMode, scope: SessionScope, today: string
       items: take.map((card) => ({ type: "card", key: `card:${card.id}`, card, context: contextOf(card, scope) })),
       remaining: all.length - take.length,
     };
+  }
+
+  if (mode === "weak") {
+    const cards = scopedCards(scope, { where: WEAK_CARD, order: "c.lapses DESC, c.interval_days ASC, c.id" });
+    // Distractors come from the whole class, so a small unit still gets plausible options.
+    const classIds = [...new Set(cards.map((c) => c.class_id))];
+    const pool = classIds.length === 1 && scope.unitId ? scopedCards({ classId: classIds[0] }) : cards;
+    const missedQuestions = (
+      db()
+        .prepare(
+          `SELECT q.*, k.name AS class_name, u.name AS unit_name FROM quiz_questions q
+           JOIN units u ON u.id = q.unit_id JOIN sections s ON s.id = u.section_id JOIN classes k ON k.id = s.class_id
+           WHERE ${scopeWhere(scope, "q.unit_id")} AND ${WEAK_QUESTION}
+           ORDER BY (q.times_seen - q.times_correct) DESC, q.id`,
+        )
+        .all(scopeArgs(scope)) as (QuestionDbRow & { class_name: string; unit_name: string })[]
+    ).map((raw) => {
+      const q = parseQuestion(raw);
+      return {
+        type: "mcq" as const,
+        key: `q:${q.id}`,
+        label: "You've missed this one before",
+        prompt: q.prompt,
+        choices: q.choices,
+        answer: q.answer,
+        explanation: q.explanation || undefined,
+        questionId: q.id,
+        context: scope.unitId ? "" : `${raw.class_name} › ${raw.unit_name}`,
+      };
+    });
+
+    // Questions fill at most a third of the session, so drilling stays mostly about the cards.
+    const fromQuestions = missedQuestions.slice(0, Math.min(missedQuestions.length, Math.ceil(WEAK_SESSION / 3)));
+    const items: SessionItem[] = [];
+    for (const card of cards) {
+      if (items.length >= WEAK_SESSION - fromQuestions.length) break;
+      // Answering beats recognizing, so ask a question about the card when there are enough options.
+      items.push(cardQuestion(card, pool, scope) ?? { type: "card", key: `card:${card.id}`, card, context: contextOf(card, scope) });
+    }
+    items.push(...fromQuestions);
+    return { mode, title, unitId, items: shuffle(items), remaining: Math.max(0, cards.length + missedQuestions.length - items.length) };
   }
 
   // Quiz: saved AI questions (least seen and most missed first) plus questions built from flashcards.
