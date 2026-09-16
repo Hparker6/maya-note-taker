@@ -72,7 +72,7 @@ export function useTreeActions() {
       async deleteClass(klass: Pick<ClassRow, "id" | "name">, redirect = false) {
         const ok = await confirm({
           title: `Delete ${klass.name}?`,
-          message: "This permanently deletes the class with all of its sections, units, PDFs, notes and study sheets.",
+          message: "This permanently deletes the class with all of its sections, units, PDFs, notes, handwriting, study sheets, flashcards and quiz questions.",
           confirmLabel: "Delete class",
           danger: true,
         });
@@ -84,7 +84,7 @@ export function useTreeActions() {
       async deleteSection(section: Pick<SectionRow, "id" | "name" | "class_id">, redirect = false) {
         const ok = await confirm({
           title: `Delete ${section.name}?`,
-          message: "This permanently deletes the section and every unit, PDF, note and sheet inside it.",
+          message: "This permanently deletes the section and every unit, PDF, note, sheet, flashcard and quiz question inside it.",
           confirmLabel: "Delete section",
           danger: true,
         });
@@ -96,7 +96,7 @@ export function useTreeActions() {
       async deleteUnit(unit: Pick<UnitRow, "id" | "name">, redirectTo?: string) {
         const ok = await confirm({
           title: `Delete ${unit.name}?`,
-          message: "This permanently deletes the unit with its PDFs, notes and study sheet.",
+          message: "This permanently deletes the unit with its PDFs, notes, study sheet, flashcards and quiz questions.",
           confirmLabel: "Delete unit",
           danger: true,
         });
