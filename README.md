@@ -127,6 +127,7 @@ Everything you add lives in the `data` folder inside `maya-note-taker`: the data
 - **Back up:** stop the app, then copy the `data` folder somewhere safe, like a USB drive or cloud storage.
 - **Move to a new computer:** do [Set it up](#set-it-up) steps 1–4 there. Copy your backed-up `data` folder into the new `maya-note-taker` folder, replacing any `data` folder already there. Then start the app.
 - **Don't keep the `maya-note-taker` folder inside OneDrive, iCloud Drive or Dropbox.** Syncing the database while the app is running can corrupt it. Put backup copies there instead.
+- **Automatic backups:** the app copies its database (notes, handwriting, study sheets, flashcards, quizzes) to `data/backups` shortly after starting, then about once a day, keeping the last 14, plus a copy before any update. To restore one: run `npm run stop`, delete `data/maya.db`, `data/maya.db-wal` and `data/maya.db-shm`, copy the backup to `data/maya.db`, and open the notebook again. PDFs stay in `data/files` and aren't copied.
 - **Don't share your `data` folder.** It contains your AI keys.
 
 ### Get updates

@@ -56,7 +56,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     (message: string, kind: ToastKind = "success") => {
       const id = nextId.current++;
       setToasts((t) => [...t.slice(-3), { id, kind, message }]);
-      setTimeout(() => dismiss(id), kind === "error" ? 6000 : 3200);
+      setTimeout(() => dismiss(id), kind === "error" || message.length > 90 ? 9000 : 3200);
     },
     [dismiss],
   );
