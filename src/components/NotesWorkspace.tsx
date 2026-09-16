@@ -104,7 +104,12 @@ export function NotesWorkspace({
   // Bumping a note's version remounts its editor with content that changed underneath it.
   const [editorVersions, setEditorVersions] = useState<Record<number, number>>({});
   const bumpEditors = useCallback((ids: number[]) => {
-    if (ids.length) setEditorVersions((v) => Object.fromEntries([...Object.entries(v), ...ids.map((id) => [id, (v[id] ?? 0) + 1])]));
+    if (!ids.length) return;
+    setEditorVersions((v) => {
+      const next = { ...v };
+      for (const id of ids) next[id] = (next[id] ?? 0) + 1;
+      return next;
+    });
   }, []);
   const [creating, setCreating] = useState(false);
   const [moving, setMoving] = useState<WorkspaceDocument | null>(null);

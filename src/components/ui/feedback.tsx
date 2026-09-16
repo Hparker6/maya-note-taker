@@ -146,13 +146,14 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="pointer-events-auto flex animate-pop items-start gap-2.5 rounded-xl border border-line bg-card px-3.5 py-3 text-sm shadow-float"
+            // Click-through: a notice must never sit in front of a button (only its own dismiss works).
+            className="pointer-events-none flex animate-pop items-start gap-2.5 rounded-xl border border-line bg-card px-3.5 py-3 text-sm shadow-float"
           >
             {t.kind === "success" && <CheckCircle2 className="mt-px size-4 shrink-0 text-accent" />}
             {t.kind === "error" && <AlertCircle className="mt-px size-4 shrink-0 text-danger" />}
             {t.kind === "info" && <Info className="mt-px size-4 shrink-0 text-ink-3" />}
             <p className={clsx("flex-1 leading-snug", t.kind === "error" ? "text-ink" : "text-ink-2")}>{t.message}</p>
-            <button onClick={() => dismiss(t.id)} className="text-ink-3 hover:text-ink" aria-label="Dismiss">
+            <button onClick={() => dismiss(t.id)} className="pointer-events-auto text-ink-3 hover:text-ink" aria-label="Dismiss">
               <X className="size-3.5" />
             </button>
           </div>

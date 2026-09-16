@@ -91,7 +91,7 @@ export function StudySession({
         question_results: [...questionResults.current].map(([id, correct]) => ({ id, correct })),
       };
       // Reviews answered just before the end go first, so the streak reflects them.
-      await waitForPractice(4000);
+      await waitForPractice(2500);
       try {
         return await api<StreakInfo>("/api/practice/log", { method: "POST", json: body });
       } catch {

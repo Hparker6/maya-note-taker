@@ -16,13 +16,19 @@ export const GEMINI_FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS ?? "ge
   .filter(Boolean);
 export const CLAUDE_MODEL = "claude-opus-5";
 
+/** First non-blank value: a key that is blank (or stray whitespace in .env) counts as "not set". */
+const firstKey = (...values: (string | null | undefined)[]) => values.map((v) => v?.trim()).find(Boolean) ?? null;
+
+const geminiEnvKey = () => firstKey(process.env.GEMINI_API_KEY, process.env.GOOGLE_API_KEY);
+const claudeEnvKey = () => firstKey(process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_AUTH_TOKEN);
+
 /** Keys pasted in the app win over environment variables. */
 export function geminiKey() {
-  return getSetting(GEMINI_KEY) || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || null;
+  return firstKey(getSetting(GEMINI_KEY)) ?? geminiEnvKey();
 }
 
 export function claudeKey() {
-  return getSetting(CLAUDE_KEY) || process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || null;
+  return firstKey(getSetting(CLAUDE_KEY)) ?? claudeEnvKey();
 }
 
 /** The provider to use: the one chosen in settings if it has a key, else Gemini (free tier), else Claude. */
@@ -46,8 +52,8 @@ export function aiStatus(): AiStatus {
     provider: activeProvider(),
     geminiKeyHint: hint(geminiKey()),
     claudeKeyHint: hint(claudeKey()),
-    geminiFromEnv: !getSetting(GEMINI_KEY) && Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
-    claudeFromEnv: !getSetting(CLAUDE_KEY) && Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN),
+    geminiFromEnv: !firstKey(getSetting(GEMINI_KEY)) && Boolean(geminiEnvKey()),
+    claudeFromEnv: !firstKey(getSetting(CLAUDE_KEY)) && Boolean(claudeEnvKey()),
     geminiModel: GEMINI_MODEL,
     claudeModel: CLAUDE_MODEL,
   };

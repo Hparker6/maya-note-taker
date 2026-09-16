@@ -62,6 +62,8 @@ const SAVE_DELAY = 800;
 const MAX_WAIT = 5_000;
 const DRAFT_PREFIX = "maya:unsaved-note:";
 const DRAFT_MAX_AGE = 60 * 24 * 60 * 60 * 1000;
+const DRAFT_THROTTLE = 1_000;
+const MAX_DRAFT_INK = 1_500_000;
 const IDLE: NoteSyncState = { status: "idle", error: null, blocked: false };
 
 const entries = new Map<number, Entry>();
@@ -142,8 +144,10 @@ interface Draft {
 function writeDraft(id: number) {
   const entry = entries.get(id);
   try {
-    if (!entry || !hasPending(entry)) localStorage.removeItem(DRAFT_PREFIX + id);
-    else localStorage.setItem(DRAFT_PREFIX + id, JSON.stringify({ v: 1, at: Date.now(), text: entry.text, ink: entry.ink } satisfies Draft));
+    if (!entry || !hasPending(entry)) return localStorage.removeItem(DRAFT_PREFIX + id);
+    // A page of handwriting is far too big for browser storage; it's still held in memory and retried.
+    const ink = entry.ink && entry.ink.ink.length + entry.ink.from.length < MAX_DRAFT_INK ? entry.ink : undefined;
+    localStorage.setItem(DRAFT_PREFIX + id, JSON.stringify({ v: 1, at: Date.now(), text: entry.text, ink } satisfies Draft));
   } catch {
     // Storage full or unavailable (private browsing): the in-memory copy and retries still protect the edit.
   }
@@ -158,7 +162,7 @@ function writeDirtyDrafts() {
 
 function markDraft(id: number) {
   dirtyDrafts.add(id);
-  draftTimer ??= setTimeout(writeDirtyDrafts, 250);
+  draftTimer ??= setTimeout(writeDirtyDrafts, DRAFT_THROTTLE);
 }
 
 function readDraft(id: number): Draft | null {

@@ -4,6 +4,7 @@ import { htmlForPrompt, markdownToSafeHtml, wordCount } from "./html";
 import { describeAiError, generateJson, streamText, UserFacingError, type LlmPart, type StreamCallbacks } from "./llm";
 import { addAiCards, addQuestions, listCards } from "./practice";
 import {
+  createNote,
   getClass,
   getDocument,
   getDocumentInternals,
@@ -369,8 +370,20 @@ export async function transcribeDocument(documentId: number, cb: GenerationCallb
 
     const { text, truncated } = await streamText(TRANSCRIBE_SYSTEM, parts, cb);
     const html = markdownToSafeHtml(text.trim());
+
+    // A conversion that came back cut off (or suspiciously short) would lose text that was already
+    // there, so the previous version is kept as its own note rather than thrown away.
+    const previous = getImportNote(documentId);
+    const previousWords = previous ? wordCount(previous.content) : 0;
+    const shrank = previousWords > 50 && (truncated || wordCount(html) < previousWords * 0.6);
+    if (previous && shrank) createNote({ unitId: doc.unit_id, documentId: null, title: `${doc.title} (before AI conversion)`.slice(0, 200), content: previous.content });
+
     setImportContent(documentId, html, "ai");
-    return { html, warning: truncated ? "This PDF is very long; the end may be missing. The original PDF is still attached." : undefined };
+    const notes = [
+      truncated ? "This PDF is very long; the end may be missing. The original PDF is still attached." : "",
+      shrank ? "The text this lecture had before was kept as a separate note." : "",
+    ].filter(Boolean);
+    return { html, warning: notes.join(" ") || undefined };
   } catch (err) {
     throw new UserFacingError(describeAiError(err));
   }
